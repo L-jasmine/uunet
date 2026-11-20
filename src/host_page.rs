@@ -10,7 +10,7 @@ use ratatui_kit::{
     prelude::*,
     ratatui::{
         layout::{Constraint, Direction, Layout, Rect},
-        style::{Color, Style, Stylize},
+        style::{Style, Stylize},
         text::Line,
         widgets::{Block, Paragraph, Widget},
     },
@@ -18,6 +18,8 @@ use ratatui_kit::{
 use std::cmp::min;
 
 const WHITELIST_FIELDS: [&str; 4] = ["名称", "协议", "地址", "端口"];
+/// 追加表单段高度:边框 2 行 + 字段行。
+const WHITELIST_FORM_HEIGHT: u16 = WHITELIST_FIELDS.len() as u16 + 2;
 
 #[derive(Default, Props)]
 pub struct HostPageProps {
@@ -174,16 +176,25 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
         width: Constraint::Percentage(100),
         height: Constraint::Percentage(100),
     ) {
-        widget(HostHeaderWidget { state: host_state_text, connections: stats_value })
-        widget(WhitelistWidget {
-            settings: settings_value,
-            selected: selected_value,
-            form_rows,
-            error: form_error_text,
-            show_form,
+        // 每段外包 View 指定高度(widget 适配器默认约束是 Percentage(100),
+        // 多 child 会被 Layout 平分)。
+        element!(View(height: Constraint::Length(1)) {
+            widget(HostHeaderWidget { state: host_state_text, connections: stats_value })
         })
+        element!(View(height: Constraint::Min(0)) {
+            widget(WhitelistWidget {
+                settings: settings_value,
+                selected: selected_value,
+            })
+        })
+        if show_form {
+            element!(View(height: Constraint::Length(WHITELIST_FORM_HEIGHT)) {
+                widget(WhitelistFormWidget { fields: form_rows, error: form_error_text })
+            })
+        }
         if let Some(target) = confirm_target {
-            ConfirmModal(
+            element!(View(height: Constraint::Percentage(100)) {
+                ConfirmModal(
                 open: true,
                 title: Line::from(" 删除白名单条目 ").red().bold(),
                 content: TextParagraph::from(format!(
@@ -210,9 +221,12 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
                 on_cancel: move |_| {
                     confirm_idx.set(None);
                 },
-            )
+                )
+            })
         }
-        widget(HostHelpWidget)
+        element!(View(height: Constraint::Length(1)) {
+            widget(HostHelpWidget)
+        })
     })
 }
 
@@ -366,14 +380,11 @@ impl Widget for HostHeaderWidget {
     }
 }
 
-/// 白名单表(+ 可选的追加表单)。
+/// 白名单表;追加表单由外层布局单独成段,列表自身不再预留行。
 #[derive(Clone)]
 struct WhitelistWidget {
     settings: settings::Settings,
     selected: usize,
-    form_rows: Vec<(String, String, bool)>,
-    error: String,
-    show_form: bool,
 }
 
 impl Widget for WhitelistWidget {
@@ -390,65 +401,95 @@ impl Widget for WhitelistWidget {
             Constraint::Percentage(32),
             Constraint::Length(8),
         ];
-        let mut y = inner.y;
+        // 表头占 1 行,数据区从其下开始。
+        let header_y = inner.y;
         let header: [Rect; 4] =
-            Layout::horizontal(columns).areas(Rect::new(inner.x, y, inner.width, 1));
+            Layout::horizontal(columns).areas(Rect::new(inner.x, header_y, inner.width, 1));
         let labels = ["名称", "协议", "地址", "端口"];
         for (idx, chunk) in header.iter().enumerate() {
             Paragraph::new(Line::from(labels[idx]).dark_gray()).render(*chunk, buf);
         }
-        y += 1;
-        for (index, target) in self.settings.whitelist.iter().enumerate() {
-            let selected = index == self.selected;
-            let row_rect = Rect::new(inner.x, y, inner.width, 1);
-            let cells: [Rect; 4] = Layout::horizontal(columns).areas(row_rect);
-            let values = [
-                target.name.clone(),
-                target.proto.to_ascii_uppercase(),
-                target.host.clone(),
-                target.port.to_string(),
-            ];
-            for (idx, value) in values.iter().enumerate() {
-                let mut style = Style::new();
-                if selected {
-                    style = style.bg(Color::DarkGray).bold();
-                }
-                Paragraph::new(Line::from(format!(" {value}")).style(style))
-                    .render(cells[idx], buf);
-            }
-            y += 1;
-        }
-        if self.settings.whitelist.is_empty() {
+        let y = header_y + 1;
+        let empty = self.settings.whitelist.is_empty();
+        if empty {
             Paragraph::new(
                 Line::from("白名单为空:任何转发拨号都会被拒绝,按 a 添加".dark_gray()).centered(),
             )
             .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
             .render(Rect::new(inner.x, y, inner.width, 1), buf);
-            y += 1;
-        }
-        if self.show_form {
-            y += 1;
-            let form_rect = Rect::new(inner.x, y, inner.width, WHITELIST_FIELDS.len() as u16 + 1);
-            let rows: [Rect; 4] = Layout::vertical([Constraint::Length(1); 4]).areas(form_rect);
-            for ((label, value, active), row) in self.form_rows.iter().zip(rows.iter()) {
-                let marker = if *active { "▸ " } else { "  " };
-                let style = if *active {
-                    Style::new().cyan().bold()
-                } else {
-                    Style::new()
-                };
-                let cursor = if *active { "_" } else { "" };
-                Paragraph::new(
-                    Line::from(format!("{marker}{label:<6} {value}{cursor}")).style(style),
-                )
-                .render(*row, buf);
+        } else {
+            // 数据可视行数 = 内区高度 - 列表头。
+            let visible = inner.height.saturating_sub(1) as usize;
+            let count = self.settings.whitelist.len();
+            // 视口跟随选中项并尽量居中;行数不足一屏时不动。
+            let skip = if count <= visible {
+                0
+            } else {
+                self.selected
+                    .saturating_sub(visible / 2)
+                    .min(count - visible)
+            };
+            for (row_idx, target) in self
+                .settings
+                .whitelist
+                .iter()
+                .skip(skip)
+                .take(visible)
+                .enumerate()
+            {
+                let index = skip + row_idx;
+                let selected = index == self.selected;
+                let row_rect = Rect::new(inner.x, y + row_idx as u16, inner.width, 1);
+                let cells: [Rect; 4] = Layout::horizontal(columns).areas(row_rect);
+                let values = [
+                    target.name.clone(),
+                    target.proto.to_ascii_uppercase(),
+                    target.host.clone(),
+                    target.port.to_string(),
+                ];
+                for (idx, value) in values.iter().enumerate() {
+                    let mut style = Style::new();
+                    if selected {
+                        style = style.reversed();
+                    }
+                    Paragraph::new(Line::from(format!(" {value}")))
+                        .style(style)
+                        .render(cells[idx], buf);
+                }
             }
         }
+    }
+}
+
+/// 追加条目表单段(独立边框,错误行显示在框内首行)。
+#[derive(Clone)]
+struct WhitelistFormWidget {
+    fields: Vec<(String, String, bool)>,
+    error: String,
+}
+
+impl Widget for WhitelistFormWidget {
+    fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
+        let block = Block::bordered()
+            .title(Line::from(" 新增条目 ").cyan().bold())
+            .border_style(Style::new().cyan());
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        let rows: [Rect; 4] = Layout::vertical([Constraint::Length(1); 4]).areas(inner);
+        for ((label, value, active), row) in self.fields.iter().zip(rows.iter()) {
+            let marker = if *active { "▸ " } else { "  " };
+            let style = if *active {
+                Style::new().cyan().bold()
+            } else {
+                Style::new()
+            };
+            let cursor = if *active { "_" } else { "" };
+            Paragraph::new(Line::from(format!("{marker}{label:<6} {value}{cursor}")).style(style))
+                .render(*row, buf);
+        }
         if !self.error.is_empty() {
-            Paragraph::new(Line::from(self.error).red()).render(
-                Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1),
-                buf,
-            );
+            Paragraph::new(Line::from(self.error).red()).render(inner, buf);
         }
     }
 }

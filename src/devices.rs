@@ -8,7 +8,7 @@ use ratatui_kit::{
     prelude::*,
     ratatui::{
         layout::{Constraint, Direction, Layout, Rect},
-        style::{Color, Style, Stylize},
+        style::{Style, Stylize},
         text::Line,
         widgets::{Block, Paragraph, Widget},
     },
@@ -136,13 +136,21 @@ pub fn Devices(props: &mut DevicesProps, mut hooks: Hooks) -> impl Into<AnyEleme
         width: Constraint::Percentage(100),
         height: Constraint::Percentage(100),
     ) {
-        widget(DevicesHeaderWidget {
-            total: devices_value.len(),
-            online: devices_value.iter().filter(|d| d.online).count(),
-            host_status: host_status.read().clone(),
+        // widget 适配器自身的默认约束是 Percentage(100),多 child 会被
+        // Layout 平分(小终端上下大片留白);每段外包 View 指定高度。
+        element!(View(height: Constraint::Length(1)) {
+            widget(DevicesHeaderWidget {
+                total: devices_value.len(),
+                online: devices_value.iter().filter(|d| d.online).count(),
+                host_status: host_status.read().clone(),
+            })
         })
-        widget(DevicesWidget { devices: devices_value, selected: selected_value, error: error_value })
-        widget(DevicesHelpWidget)
+        element!(View(height: Constraint::Min(0)) {
+            widget(DevicesWidget { devices: devices_value, selected: selected_value, error: error_value })
+        })
+        element!(View(height: Constraint::Length(1)) {
+            widget(DevicesHelpWidget)
+        })
     })
 }
 
@@ -163,8 +171,8 @@ impl Widget for DevicesHeaderWidget {
         };
         Paragraph::new(
             Line::from(format!(
-                " uunet 设备列表   共 {} 台,在线 {} 台{}",
-                self.total, self.online, suffix
+                " uunet 设备列表   {}/{}{}",
+                self.online, self.total, suffix
             ))
             .cyan()
             .bold(),
@@ -173,8 +181,8 @@ impl Widget for DevicesHeaderWidget {
     }
 }
 
-/// Bordered device list; rows past the visible area scroll by page as the
-/// selection moves.
+/// Bordered device list; when rows exceed the visible area the viewport
+/// follows the selection (kept near center).
 #[derive(Clone)]
 struct DevicesWidget {
     devices: Vec<Device>,
@@ -198,11 +206,15 @@ impl Widget for DevicesWidget {
             Constraint::Percentage(30),
             Constraint::Length(8),
         ];
-        let visible = inner.height as usize;
-        let skip = if visible == 0 {
+        // 可视数据行数(减列表头);此前误用含表头的高度,末行会画到边框外。
+        let visible = inner.height.saturating_sub(1) as usize;
+        // 视口跟随选中项并尽量居中;行数不足一屏时不动。
+        let skip = if self.devices.len() <= visible {
             0
         } else {
-            self.selected / visible * visible
+            self.selected
+                .saturating_sub(visible / 2)
+                .min(self.devices.len() - visible)
         };
 
         let header: [Rect; 5] = Layout::horizontal(columns).areas(inner);
@@ -246,9 +258,10 @@ impl Widget for DevicesWidget {
                     Style::new().dark_gray()
                 };
                 if is_selected {
-                    style = style.bg(Color::DarkGray).bold();
+                    style = style.reversed();
                 }
-                Paragraph::new(Line::from(format!(" {value}")).style(style))
+                Paragraph::new(Line::from(format!(" {value}")))
+                    .style(style)
                     .render(cells[col_idx], buf);
             }
         }
@@ -326,5 +339,49 @@ mod tests {
             assert!(joined.contains(label), "missing {label} in:\n{joined}");
         }
         assert!(rows[0].starts_with('┌') && rows[0].ends_with('┐'));
+    }
+
+    fn device(index: usize) -> Device {
+        Device {
+            id: format!("dev-{index}"),
+            name: format!("node-{index}"),
+            os: "Linux".into(),
+            detail: "2.1.0".into(),
+            online: true,
+        }
+    }
+
+    #[test]
+    fn devices_widget_scrolls_to_keep_selection_visible() {
+        // 6 行高 = 边框 2 + 表头 1 + 数据 3;5 台设备必然溢出。
+        let devices: Vec<_> = (0..5).map(device).collect();
+        let area = Rect::new(0, 0, 60, 6);
+        let mut buf = Buffer::empty(area);
+        DevicesWidget {
+            devices,
+            selected: 4,
+            error: String::new(),
+        }
+        .render(area, &mut buf);
+
+        let rows: Vec<String> = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect()
+            })
+            .collect();
+        let joined = rows.join("\n").replace(' ', "");
+        // 视口跟随选中项:末台可见,首台滚出。
+        assert!(
+            joined.contains("node-4"),
+            "selected row missing in:\n{joined}"
+        );
+        assert!(
+            !joined.contains("node-0"),
+            "stale row still rendered in:\n{joined}"
+        );
+        // 数据不越过底边框:边框行之外没有 node-* 残留。
+        assert!(rows[area.height as usize - 1].contains('└'));
     }
 }

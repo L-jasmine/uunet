@@ -12,7 +12,7 @@ use ratatui_kit::{
     prelude::*,
     ratatui::{
         layout::{Constraint, Direction, Layout, Rect},
-        style::{Color, Style, Stylize},
+        style::{Style, Stylize},
         text::Line,
         widgets::{Block, Paragraph, Widget},
     },
@@ -20,7 +20,7 @@ use ratatui_kit::{
 use std::cmp::min;
 
 const FORM_FIELDS: [&str; 5] = ["名称", "协议", "本地端口", "目标地址", "目标端口"];
-const FORM_HEIGHT: u16 = 9;
+const FORM_HEIGHT: u16 = 7; // 边框 2 行 + 5 个字段行
 
 #[derive(Default, Props)]
 pub struct PortMapProps {
@@ -185,6 +185,12 @@ pub fn PortMap(props: &mut PortMapProps, mut hooks: Hooks) -> impl Into<AnyEleme
         None => " uunet 端口映射".to_string(),
     };
     let rules_value = rules.read().clone();
+    // 规则统计(启用/总数)显示在列表边框右上角;目标设备已在首行标题。
+    let rules_header_right = format!(
+        "{}/{}",
+        rules_value.iter().filter(|r| r.enabled).count(),
+        rules_value.len()
+    );
     let selected_value = selected.get().min(rules_value.len().saturating_sub(1));
     let name_value = f_name.read().clone();
     let proto_value = f_proto.get();
@@ -213,23 +219,30 @@ pub fn PortMap(props: &mut PortMapProps, mut hooks: Hooks) -> impl Into<AnyEleme
         width: Constraint::Percentage(100),
         height: Constraint::Percentage(100),
     ) {
-        widget(HeaderWidget {
-            title: header_title,
-            session: session_text,
-            running,
-            total: rules_value.len(),
-            enabled: rules_value.iter().filter(|r| r.enabled).count(),
+        // 每段外包 View 指定高度(widget 适配器默认约束是 Percentage(100),
+        // 多 child 会被 Layout 平分)。
+        element!(View(height: Constraint::Length(1)) {
+            widget(HeaderWidget {
+                title: header_title,
+                session: session_text,
+                running,
+            })
         })
-        widget(RulesWidget {
-            rules: rules_value.clone(),
-            selected: selected_value,
-            reserved_bottom: if show_form { FORM_HEIGHT } else { 0 },
+        element!(View(height: Constraint::Min(0)) {
+            widget(RulesWidget {
+                rules: rules_value.clone(),
+                selected: selected_value,
+                header_right: rules_header_right,
+            })
         })
         if show_form {
-            widget(FormWidget { fields: form_rows, error: form_error_text })
+            element!(View(height: Constraint::Length(FORM_HEIGHT)) {
+                widget(FormWidget { fields: form_rows, error: form_error_text })
+            })
         }
         if let Some(rule) = confirm_rule {
-            ConfirmModal(
+            element!(View(height: Constraint::Percentage(100)) {
+                ConfirmModal(
                 open: true,
                 title: Line::from(" 删除规则 ").red().bold(),
                 content: TextParagraph::from(format!("确定删除「{}」吗?", rule.name)),
@@ -254,9 +267,12 @@ pub fn PortMap(props: &mut PortMapProps, mut hooks: Hooks) -> impl Into<AnyEleme
                 on_cancel: move |_| {
                     confirm_id.set(None);
                 },
-            )
+                )
+            })
         }
-        widget(HelpWidget)
+        element!(View(height: Constraint::Length(1)) {
+            widget(HelpWidget)
+        })
     })
 }
 
@@ -462,14 +478,12 @@ fn build_form_rows(
         .collect()
 }
 
-/// 标题 + 会话状态 + 规则统计。
+/// 标题 + 会话状态(规则统计移至列表边框右上角)。
 #[derive(Clone)]
 struct HeaderWidget {
     title: String,
     session: String,
     running: bool,
-    total: usize,
-    enabled: usize,
 }
 
 impl Widget for HeaderWidget {
@@ -480,41 +494,35 @@ impl Widget for HeaderWidget {
             Style::new().dark_gray()
         };
         Paragraph::new(Line::from(vec![
-            format!(
-                " {}   规则 {} 条,启用 {} 条   ",
-                self.title, self.total, self.enabled
-            )
-            .into(),
+            format!(" {}   ", self.title).into(),
             ratatui_kit::ratatui::text::Span::styled(format!("[{}]", self.session), session_style),
         ]))
         .render(area, buf);
     }
 }
 
-/// 带边框的规则表;超出可视区的行按页滚动。
+/// 带边框的规则表;超出可视区时视口跟随选中项滚动。
+/// 追加表单由外层布局单独成段,列表自身不再预留底部行。
 #[derive(Clone)]
 struct RulesWidget {
     rules: Vec<Rule>,
     selected: usize,
-    /// 底部为追加表单保留的行数(0 = 无)。
-    reserved_bottom: u16,
+    /// 显示在上边框右侧的统计文本(启用/总数)。
+    header_right: String,
 }
 
 impl Widget for RulesWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
-        let frame = if self.reserved_bottom > 0 {
-            let chunks: [Rect; 2] =
-                Layout::vertical([Constraint::Min(3), Constraint::Length(self.reserved_bottom)])
-                    .areas(area);
-            chunks[0]
-        } else {
-            area
-        };
         let block = Block::bordered()
             .title(Line::from(" 端口映射规则 ").cyan())
+            .title(
+                Line::from(format!("{} ", self.header_right))
+                    .dark_gray()
+                    .right_aligned(),
+            )
             .border_style(Style::new().cyan());
-        let inner = block.inner(frame);
-        block.render(frame, buf);
+        let inner = block.inner(area);
+        block.render(area, buf);
 
         let columns = [
             Constraint::Length(3),
@@ -525,10 +533,13 @@ impl Widget for RulesWidget {
             Constraint::Length(8),
         ];
         let visible = inner.height.saturating_sub(1) as usize; // 减列表头
-        let skip = if visible == 0 {
+        // 视口跟随选中项并尽量居中;行数不足一屏时不动。
+        let skip = if self.rules.len() <= visible {
             0
         } else {
-            self.selected / visible * visible
+            self.selected
+                .saturating_sub(visible / 2)
+                .min(self.rules.len() - visible)
         };
 
         let header: [Rect; 6] = Layout::horizontal(columns).areas(inner);
@@ -571,9 +582,10 @@ impl Widget for RulesWidget {
                     Style::new().dark_gray()
                 };
                 if is_selected {
-                    style = style.bg(Color::DarkGray).bold();
+                    style = style.reversed();
                 }
-                Paragraph::new(Line::from(format!(" {value}")).style(style))
+                Paragraph::new(Line::from(format!(" {value}")))
+                    .style(style)
                     .render(cells[col_idx], buf);
             }
         }
