@@ -15,6 +15,12 @@ pub(crate) const ACTION_TYPE_ECHO_RESPONSE: i32 = 1;
 /// omarchyuu `protocol::official_version::CAPTURE_SETTING_LEVEL`。
 const CAPTURE_SETTING_LEVEL: i32 = 6;
 
+/// 主控侧裸 ECHO 请求(omarchyuu wire::encode_pb_echo_request:
+/// 无 args、seq/timestamp 为 0,靠 ECHO_RESPONSE 的 seq 关联)。
+pub(crate) fn bare_echo_request() -> Vec<u8> {
+    encode_pb_echo(ACTION_TYPE_ECHO_REQUEST, String::new(), 0, 0)
+}
+
 /// 被控在 CONTROL 通道 open 时主动发的第一条消息(echo(1, 0, true))。
 pub(crate) fn echo_request(seq: i64, timestamp: i64) -> Vec<u8> {
     encode_pb_echo(ACTION_TYPE_ECHO_REQUEST, String::new(), seq, timestamp)
@@ -272,6 +278,83 @@ pub(crate) struct DecoderCapability {
     pub height: i32,
     #[prost(int32, tag = "5")]
     pub chroma: i32,
+}
+
+/// 主控发起端口映射会话的 `control` 信令帧(omarchyuu
+/// `session/negotiation.rs` 的最小字段版:kind/设备号/连接类型/feature
+/// 开关/协议版本;采集参数与解码器列表对数据型会话无意义,省略)。
+pub(crate) struct ControlFrames {
+    pub(crate) header: String,
+    pub(crate) attachment: Vec<u8>,
+    pub(crate) app_control_id: String,
+}
+
+pub(crate) fn build_port_mapping_connect_frames(
+    controller_device_id: &str,
+    ack_id: u64,
+) -> anyhow::Result<ControlFrames> {
+    use wire::{bytes_field, signed_int32_field, varint_field};
+    if controller_device_id.len() != 16
+        || !controller_device_id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+    {
+        anyhow::bail!("本机设备号无效,无法发起端口映射");
+    }
+    let app_control_id = uuid::Uuid::new_v4().to_string();
+    let streamer_data = serde_json::to_string(&serde_json::json!({
+        "control_id": app_control_id,
+        "device_capability": {},
+    }))?;
+    let event = serde_json::json!([
+        "control",
+        {
+            "app_control_id": app_control_id,
+            "app_data": { "_placeholder": true, "num": 0 },
+            "streamer_data": streamer_data,
+        }
+    ]);
+    let mut options = Vec::new();
+    varint_field(&mut options, 1, 9); // kind = PortMapping
+    signed_int32_field(&mut options, 2, -1); // screen_id:数据型会话无屏
+    varint_field(&mut options, 8, 3); // client_type:桌面控制器 ABI
+    bytes_field(&mut options, 9, controller_device_id.as_bytes());
+    varint_field(&mut options, 10, 1); // connect_type = Normal
+    bytes_field(
+        &mut options,
+        11,
+        &PbFeatureFlag::read_only_viewer().encode_to_vec(),
+    );
+    bytes_field(&mut options, 12, crate::backend::nrd::CLIENT_VERSION.as_bytes());
+    Ok(ControlFrames {
+        header: format!("451-{ack_id}{}", serde_json::to_string(&event)?),
+        attachment: options,
+        app_control_id,
+    })
+}
+
+/// 手写 protobuf varint 辅助(omarchyuu session/negotiation.rs 的编码方式;
+/// ConnectOptions/CaptureParams 这类嵌套消息按字段号手工拼装)。
+pub(crate) mod wire {
+    fn push_varint(output: &mut Vec<u8>, mut value: u64) {
+        while value >= 0x80 {
+            output.push((value as u8 & 0x7f) | 0x80);
+            value >>= 7;
+        }
+        output.push(value as u8);
+    }
+    pub(crate) fn varint_field(output: &mut Vec<u8>, number: u32, value: u64) {
+        push_varint(output, u64::from(number) << 3);
+        push_varint(output, value);
+    }
+    pub(crate) fn signed_int32_field(output: &mut Vec<u8>, number: u32, value: i32) {
+        varint_field(output, number, value as i64 as u64);
+    }
+    pub(crate) fn bytes_field(output: &mut Vec<u8>, number: u32, value: &[u8]) {
+        push_varint(output, (u64::from(number) << 3) | 2);
+        push_varint(output, value.len() as u64);
+        output.extend_from_slice(value);
+    }
 }
 
 /// 数据型会话 kind:5 文件 / 8 终端 / 9 端口转发(omarchyuu signal/host.rs:347)。

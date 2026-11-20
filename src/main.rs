@@ -9,6 +9,7 @@ use clap::Parser;
 mod app;
 mod backend;
 mod capability;
+mod controller;
 mod devices;
 mod fec;
 mod forward;

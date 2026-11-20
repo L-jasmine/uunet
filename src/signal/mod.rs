@@ -9,7 +9,7 @@
 //! unmodified copies.
 
 use crate::backend::nrd::RoomSession;
-use anyhow::{Result, anyhow};
+use anyhow::{Context as _, Result, anyhow, bail};
 
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -20,7 +20,7 @@ use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 use transport::SignalTransport;
 pub(crate) use transport::{SignalFailure, SocketState};
-pub(crate) use negotiation::ControlIceServer;
+pub(crate) use negotiation::{ControlIceServer, ControlSessionInfo};
 pub use wire::{EnginePacket, SocketPacket, encode_event, encode_pong};
 pub(crate) use wire::{encode_binary_event, gzip_sdp};
 
@@ -33,6 +33,9 @@ const STREAMER_FLAG_HEADER: &str = "streamer_flag";
 const STREAMER_VERSION: &str = "V4.7.3";
 const STREAMER_FLAG: &str = r#"{"sdp_flags":{"gzip_sdp":true}}"#;
 const ROOM_INFO_ACK_ID: u64 = 1;
+const CONTROL_ACK_ID: u64 = 2;
+const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
+const WEBRTC_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 const ROOM_INFO_TIMEOUT: Duration = Duration::from_secs(10);
 const RECONNECT_KEY_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const RECONNECT_KEY_MAX_AGE: Duration = Duration::from_secs(300);
@@ -168,6 +171,285 @@ impl SignalSession {
                 packet => self.deferred.push_back(packet),
             }
         }
+    }
+
+    /// 发起端口映射控制握手:发 `control` 帧并等待服务端 ACK。
+    pub(crate) async fn start_control(
+        &mut self,
+        frames: crate::pb::ControlFrames,
+    ) -> Result<ControlSessionInfo> {
+        self.send_binary_packet(frames.header, frames.attachment)?;
+        let mut info = timeout(CONTROL_TIMEOUT, self.wait_control_ack())
+            .await
+            .context("控制握手超时")??;
+        info.app_control_id = frames.app_control_id;
+        tracing::debug!(
+            ice_server_count = info.ice_servers.len(),
+            force_relay = info.force_relay,
+            "control handshake accepted"
+        );
+        Ok(info)
+    }
+
+    async fn wait_control_ack(&mut self) -> Result<ControlSessionInfo> {
+        loop {
+            match self.transport.next_packet().await? {
+                EnginePacket::Message(SocketPacket::Ack { id, args, .. })
+                    if id == CONTROL_ACK_ID =>
+                {
+                    if args.len() < 2 || args[0].as_str() != Some("success") {
+                        bail!("目标设备拒绝了控制握手");
+                    }
+                    let info: ControlSessionInfo = serde_json::from_value(args[1].clone())
+                        .context("控制握手 ACK 载荷异常")?;
+                    if info.code != 0
+                        || info.client_id.is_empty()
+                        || info.ice_id.is_empty()
+                        || info.ice_servers.is_empty()
+                    {
+                        bail!("控制握手 ACK 缺少可用的会话配置");
+                    }
+                    return Ok(info);
+                }
+                EnginePacket::Message(SocketPacket::ConnectError { .. }) => {
+                    bail!("信令服务器拒绝了控制握手")
+                }
+                EnginePacket::Ping(payload) => self.send_text(encode_pong(&payload)).await?,
+                packet => self.deferred.push_back(packet),
+            }
+        }
+    }
+
+    /// 发 offer 并完成 ICE 交换,直到 PeerConnection 进入 Connected。
+    pub(crate) async fn negotiate(
+        &mut self,
+        info: &ControlSessionInfo,
+        peer: &crate::peer::controller::ControllerPeer,
+        candidates: &mut tokio::sync::mpsc::UnboundedReceiver<
+            webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
+        >,
+    ) -> Result<()> {
+        let offer = peer.offer().await?;
+        let attachment = wire::gzip_sdp(&offer)?;
+        let payload = serde_json::json!({
+            "client_id": info.client_id,
+            "data": {
+                "app_control_id": info.app_control_id,
+                "gzip_sdp": { "_placeholder": true, "num": 0 },
+                "ice_id": info.ice_id,
+                "ice_network_type": 3,
+                "sdp": "",
+                "type": "offer"
+            }
+        });
+        self.send_binary_packet(
+            wire::encode_binary_event("soac", &[payload], None, 1)?,
+            attachment,
+        )?;
+        tracing::info!("controller offer sent; exchanging ICE");
+        let result = timeout(WEBRTC_CONNECT_TIMEOUT, async {
+            let mut answer_installed = false;
+            loop {
+                if peer.connected() {
+                    self.transport.set_controlling(true);
+                    return Ok(());
+                }
+                tokio::select! {
+                    candidate = candidates.recv() => match candidate {
+                        Some(candidate) => {
+                            let Some(candidate) = peer.local_candidate(candidate).await else {
+                                continue;
+                            };
+                            let payload = serde_json::json!({"client_id": info.client_id, "data": {
+                                "app_control_id": info.app_control_id, "ice_id": info.ice_id,
+                                "ice_network_type": 0, "type": "candidate", "candidate": candidate}});
+                            self.send_text(encode_event("soac", &[payload], None)?).await?;
+                        }
+                        None => {}
+                    },
+                    packet = self.next_packet() => match packet? {
+                        EnginePacket::Message(SocketPacket::Event { event, args, .. })
+                            if event == "soac" =>
+                        {
+                            let soac = match negotiation::parse_remote_soac(&args, Some(info)) {
+                                Ok(soac) => soac,
+                                Err(error) => {
+                                    tracing::warn!(%error, "discarded invalid SOAC event");
+                                    continue;
+                                }
+                            };
+                            match soac {
+                                Some(negotiation::RemoteSoac::Answer { sdp, restart_ice }) => {
+                                    if let Err(error) =
+                                        peer.set_remote_answer(sdp).await
+                                    {
+                                        tracing::warn!(%error, restart_ice, "remote answer rejected");
+                                        continue;
+                                    }
+                                    answer_installed = true;
+                                    tracing::info!("controller installed remote answer");
+                                }
+                                Some(negotiation::RemoteSoac::Candidate(candidate))
+                                    if answer_installed =>
+                                {
+                                    if let Err(error) =
+                                        peer.add_remote_candidate(candidate).await
+                                    {
+                                        tracing::warn!(%error, "discarded rejected remote ICE candidate");
+                                    }
+                                }
+                                Some(negotiation::RemoteSoac::Candidate(_)) => {}
+                                None => {}
+                            }
+                        }
+                        EnginePacket::Ping(payload) => self.send_text(encode_pong(&payload)).await?,
+                        EnginePacket::Close
+                        | EnginePacket::Message(SocketPacket::Disconnect { .. }) => {
+                            bail!("信令服务器在协商期间关闭了连接")
+                        }
+                        EnginePacket::Message(SocketPacket::ConnectError { .. }) => {
+                            bail!("信令服务器拒绝了协商")
+                        }
+                        _ => {}
+                    },
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                        if peer.connected() {
+                            self.transport.set_controlling(true);
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        })
+        .await;
+        match result {
+            Ok(inner) => {
+                inner?;
+                tracing::info!("controller negotiation complete");
+                Ok(())
+            }
+            Err(_) => {
+                if let Some(handshake_failure) = peer.ended().then_some(()).and(None::<anyhow::Error>) {
+                    return Err(handshake_failure);
+                }
+                anyhow::bail!("WebRTC 未能在官方 12 秒窗口内连接")
+            }
+        }
+    }
+
+    /// Controller-side keep-alive: reconnect-key refresh, ping/pong, late
+    /// SOAC events from the controlled side, and local candidate draining.
+    pub(crate) async fn keep_alive_controller(
+        mut self,
+        shutdown: oneshot::Receiver<()>,
+        peer: crate::peer::controller::ControllerPeer,
+        mut candidates: tokio::sync::mpsc::UnboundedReceiver<
+            webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
+        >,
+        info: ControlSessionInfo,
+    ) -> Result<()> {
+        let mut next_key_check = tokio::time::Instant::now() + RECONNECT_KEY_CHECK_INTERVAL;
+        let mut pending_key_refresh: Option<(u64, tokio::time::Instant)> = None;
+        let signal_result = tokio::select! {
+            biased;
+            _ = shutdown => Ok(()),
+            result = async {
+            loop {
+            tokio::select! {
+                candidate = candidates.recv() => match candidate {
+                    Some(candidate) => {
+                        let Some(candidate) = peer.local_candidate(candidate).await else {
+                            continue;
+                        };
+                        let payload = serde_json::json!({"client_id": info.client_id, "data": {
+                            "app_control_id": info.app_control_id, "ice_id": info.ice_id,
+                            "ice_network_type": 0, "type": "candidate", "candidate": candidate}});
+                        self.send_text(encode_event("soac", &[payload], None)?).await?;
+                    }
+                    None => {}
+                },
+                _ = tokio::time::sleep_until(next_key_check), if pending_key_refresh.is_none() => {
+                    if self.transport.is_connected() && self.last_reconnect_key_refresh.is_none_or(|last| last.elapsed() > RECONNECT_KEY_MAX_AGE) {
+                        let ack_id = self.next_refresh_ack_id;
+                        self.next_refresh_ack_id = ack_id.wrapping_add(1).max(3);
+                        let refresh = encode_event("refresh_reconnect_key", &[], Some(ack_id))?;
+                        if let Err(error) = self.send_text(refresh).await {
+                            tracing::warn!(%error, "refresh_reconnect_key request failed");
+                        } else {
+                            pending_key_refresh = Some((ack_id, tokio::time::Instant::now() + RECONNECT_KEY_ACK_TIMEOUT));
+                        }
+                    }
+                    next_key_check = tokio::time::Instant::now() + RECONNECT_KEY_CHECK_INTERVAL;
+                }
+                _ = async {
+                    if let Some((_, deadline)) = pending_key_refresh {
+                        tokio::time::sleep_until(deadline).await;
+                    } else { pending::<()>().await; }
+                } => {
+                    pending_key_refresh = None;
+                    next_key_check = tokio::time::Instant::now() + RECONNECT_KEY_CHECK_INTERVAL;
+                }
+                packet = self.next_packet() => {
+                    match packet {
+                        Err(error) => break Err(error),
+                        Ok(EnginePacket::Message(SocketPacket::Event { event, args, .. }))
+                            if event == "soac" =>
+                        {
+                            let soac = match negotiation::parse_remote_soac(&args, Some(&info)) {
+                                Ok(soac) => soac,
+                                Err(error) => {
+                                    tracing::warn!(%error, "discarded invalid SOAC event");
+                                    continue;
+                                }
+                            };
+                            match soac {
+                                Some(negotiation::RemoteSoac::Answer { sdp, .. }) => {
+                                    if let Err(error) = peer.set_remote_answer(sdp).await {
+                                        tracing::warn!(%error, "remote answer rejected; session retained");
+                                    }
+                                }
+                                Some(negotiation::RemoteSoac::Candidate(candidate)) => {
+                                    if let Err(error) = peer.add_remote_candidate(candidate).await {
+                                        tracing::warn!(%error, "discarded rejected remote ICE candidate; session retained");
+                                    }
+                                }
+                                None => {}
+                            }
+                        }
+                        Ok(EnginePacket::Message(SocketPacket::Ack { id, args, .. }))
+                            if pending_key_refresh.is_some_and(|(pending_id, _)| id == pending_id) =>
+                        {
+                            if args.len() >= 2
+                                && args[0].as_str() == Some("success")
+                                && let Some(value) = args[1].get("reconnect_key")
+                                && let Some(key) = value.as_str().filter(|key| !key.is_empty())
+                            {
+                                self.reconnect_key = Some(key.to_owned());
+                                self.transport.set_reconnect_key(self.reconnect_key.clone());
+                                self.last_reconnect_key_refresh = Some(Instant::now());
+                            }
+                            pending_key_refresh = None;
+                            next_key_check = tokio::time::Instant::now() + RECONNECT_KEY_CHECK_INTERVAL;
+                        }
+                        Ok(EnginePacket::Ping(payload)) => {
+                            self.send_text(encode_pong(&payload)).await?;
+                        }
+                        Ok(EnginePacket::Close)
+                        | Ok(EnginePacket::Message(SocketPacket::Disconnect { .. })) => {
+                            break Err(SignalFailure::NamespaceClosed.into());
+                        }
+                        Ok(EnginePacket::Message(SocketPacket::ConnectError { .. })) => {
+                            break Err(anyhow!("signaling server rejected the room session"));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }} => result,
+        };
+        self.transport.set_controlling(false);
+        let socket_result = self.graceful_close().await;
+        signal_result.and(socket_result)
     }
 
     /// Host-side keep-alive: reconnect-key refresh, ping/pong, and host event

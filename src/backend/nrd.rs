@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const BASE_URL: &str = "https://api.nrd.nie.163.com";
 /// 当前官方客户端版本基线(omarchyuu protocol::official_version::CLIENT)。
-const CLIENT_VERSION: &str = "4.41.2.2602";
+pub(crate) const CLIENT_VERSION: &str = "4.41.2.2602";
 const SIGNING_KEY: &[u8] = b"alWiSzXZTLu3WfFnw13uBru3";
 const PACKAGE_NAME: &str = "com.netease.uuremote";
 const CHANNEL: &str = "gwqd";
@@ -25,6 +25,7 @@ pub const USER_INFO_PATH: &str = "/api/v1/user/info";
 pub const DEVICE_LIST_PATH: &str = "/api/v1/device/list";
 pub const ROOM_CREATE_PATH: &str = "/api/v1/room/create";
 pub const DEVICE_CONTROLLABLE_PATH: &str = "/api/v1/device/controllable";
+pub const ROOM_JOIN_BY_DEVICE_PATH: &str = "/api/v1/room/join/by_device";
 
 /// 已保存登录态失效的业务码(omarchyuu ApiFailure::invalid_saved_credentials)。
 const INVALID_CREDENTIAL_CODES: [i32; 3] = [1001, 1002, 1120];
@@ -182,6 +183,22 @@ impl NrdClient {
             )
             .await?;
         Ok(())
+    }
+
+    /// 以主控身份加入目标设备的房间(kind 由 connect 帧声明,不在房间 API)。
+    pub async fn join_device(&self, device_id: &str, force_join: bool) -> CallResult<RoomSession> {
+        if device_id.len() != 16
+            || !device_id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        {
+            return Err(CallError::Transport(anyhow::anyhow!("目标设备号格式无效")));
+        }
+        self.post(
+            &format!("{ROOM_JOIN_BY_DEVICE_PATH}/{device_id}"),
+            Scope::AccountDevice,
+            &serde_json::json!({ "force_join": force_join }),
+            REQUEST_TIMEOUT,
+        )
+        .await
     }
 
     async fn send<T: DeserializeOwned>(

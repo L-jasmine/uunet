@@ -9,5 +9,5 @@ pub(crate) mod negotiation;
 pub(crate) use core::ConnectionCore;
 pub(crate) use negotiation::{
     MAX_DATA_CHANNEL_MESSAGE_SIZE, apply_uu_application_attributes_for_role,
-    negotiated_mixed_kcp_version,
+    negotiated_mixed_kcp_version, register_uu_codecs, register_uu_header_extensions,
 };

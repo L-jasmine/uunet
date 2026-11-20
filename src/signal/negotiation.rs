@@ -13,17 +13,34 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue, Request};
 use url::Url;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
+use webrtc::ice_transport::ice_server::RTCIceServer;
 
 #[derive(Clone, Deserialize)]
 pub struct ControlSessionInfo {
     pub code: i64,
     pub client_id: String,
     pub ice_id: String,
+    /// ACK JSON 字段为驼峰 `iceServers`,且服务端可能缺省。
+    #[serde(rename = "iceServers", default)]
     pub ice_servers: Vec<ControlIceServer>,
     #[serde(default)]
     pub force_relay: bool,
     #[serde(default)]
     pub app_control_id: String,
+}
+
+impl ControlSessionInfo {
+    pub fn ice_servers_struct(&self) -> Vec<RTCIceServer> {
+        self.ice_servers
+            .iter()
+            .map(|s| RTCIceServer {
+                urls: vec![s.urls.clone()],
+                username: s.username.clone(),
+                credential: s.credential.clone(),
+                ..Default::default()
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Deserialize)]

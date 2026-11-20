@@ -4,6 +4,7 @@
 //! 编解码保证 answer 与 offer 的 m-line 相容,但零采集零媒体发送;
 //! FILE 通道挂端口转发(H2),CONTROL 通道挂 PB 握手与 KCP(H2 起)。
 
+pub(crate) mod controller;
 pub(crate) mod handshake;
 
 use crate::kcp::{ControlReceiver, UuKcpControl};

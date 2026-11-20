@@ -61,7 +61,14 @@ impl ConnectionCore {
         })
     }
 
-    pub async fn offer(&self, restart: bool, streams: &str) -> Result<String> {
+    /// `mixed_kcp`:None 时 offer 不带 `a=x-uuremote-mix-kcp`,双方回落
+    /// 纯 SCTP 承载 CONTROL 消息(uunet 主控当前固定走这条路)。
+    pub async fn offer(
+        &self,
+        restart: bool,
+        streams: &str,
+        mixed_kcp: Option<u8>,
+    ) -> Result<String> {
         let options = restart.then_some(RTCOfferOptions {
             ice_restart: true,
             ..Default::default()
@@ -78,7 +85,7 @@ impl ConnectionCore {
             .set_local_description(offer)
             .await
             .context("install SDP offer")?;
-        apply_uu_application_attributes_for_role(&mut wire, streams, Some(2))?;
+        apply_uu_application_attributes_for_role(&mut wire, streams, mixed_kcp)?;
         Ok(wire)
     }
 
