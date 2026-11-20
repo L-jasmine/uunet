@@ -30,6 +30,19 @@ pub const ROOM_JOIN_BY_DEVICE_PATH: &str = "/api/v1/room/join/by_device";
 /// 已保存登录态失效的业务码(omarchyuu ApiFailure::invalid_saved_credentials)。
 const INVALID_CREDENTIAL_CODES: [i32; 3] = [1001, 1002, 1120];
 
+/// 展开错误的完整 source 链(reqwest 顶层只有泛化消息,
+/// 超时/连接拒绝/证书等真实原因在链尾)。
+fn error_chain(error: &reqwest::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
 /// 请求的身份范围:决定哪些身份头参与签名。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Scope {
@@ -221,12 +234,12 @@ impl NrdClient {
         let response = request
             .send()
             .await
-            .map_err(|e| CallError::Transport(anyhow::anyhow!("NRD 请求失败: {e}")))?;
+            .map_err(|e| CallError::Transport(anyhow::anyhow!("NRD 请求失败: {}", error_chain(&e))))?;
         let status = response.status();
         let bytes = response
             .bytes()
             .await
-            .map_err(|e| CallError::Transport(anyhow::anyhow!("NRD 响应读取失败: {e}")))?;
+            .map_err(|e| CallError::Transport(anyhow::anyhow!("NRD 响应读取失败: {}", error_chain(&e))))?;
         let envelope: Envelope<serde_json::Value> = serde_json::from_slice(&bytes)
             .map_err(|e| CallError::Transport(anyhow::anyhow!("NRD 响应解析失败 (HTTP {status}): {e}")))?;
         // 与 omarchyuu 一致:非 200 且信封 code==0 时,以 HTTP 状态码为准。

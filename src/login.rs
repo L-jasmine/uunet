@@ -75,6 +75,7 @@ pub fn Login(props: &mut LoginProps, mut hooks: Hooks) -> impl Into<AnyElement<'
                     }
                 }
                 Err(e) => {
+                    tracing::error!("登录二维码生成失败:{e:#}");
                     status.set(format!("登录服务不可用({e}),5 秒后重试"));
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
