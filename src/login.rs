@@ -99,11 +99,10 @@ pub fn Login(props: &mut LoginProps, mut hooks: Hooks) -> impl Into<AnyElement<'
         }
     });
 
-    let qr_lines = session
+    let qr = session
         .read().clone()
         .as_ref()
-        .map(|s| render_qr(&s.url))
-        .unwrap_or_default();
+        .map(|s| qr_matrix(&s.url));
     let status_text = status.read().clone();
 
     element!(View(
@@ -111,30 +110,35 @@ pub fn Login(props: &mut LoginProps, mut hooks: Hooks) -> impl Into<AnyElement<'
         width: Constraint::Percentage(100),
         height: Constraint::Percentage(100),
     ) {
-        widget(LoginWidget { qr_lines, status: status_text })
+        widget(LoginWidget { qr, status: status_text })
     })
 }
 
-/// Encode `text` as a QR image using half-block characters (two module rows
-/// per terminal row). `Light`/`Dark` are swapped because terminals draw
-/// light text on a dark background.
-fn render_qr(text: &str) -> Vec<Line<'static>> {
-    use qrcode::render::unicode;
-    let code = qrcode::QrCode::new(text.as_bytes()).expect("登录链接生成二维码失败");
-    code.render::<unicode::Dense1x2>()
-        .dark_color(unicode::Dense1x2::Light)
-        .light_color(unicode::Dense1x2::Dark)
-        .quiet_zone(false)
-        .build()
-        .lines()
-        .map(|l| Line::from(l.to_string()).style(Style::new().cyan()))
-        .collect()
+/// 把文本编码为二维码模块矩阵:返回 (含白边的宽度, 行优先的暗模块表)。
+/// 外圈补 2 模块白边(标准静区),白色背景由渲染时统一铺。
+fn qr_matrix(text: &str) -> (usize, Vec<bool>) {
+    use qrcode::EcLevel;
+    let code = qrcode::QrCode::with_error_correction_level(text.as_bytes(), EcLevel::L)
+        .expect("登录链接生成二维码失败");
+    let size = code.width();
+    let quiet = 2;
+    let width = size + quiet * 2;
+    let mut modules = vec![false; width * width]; // false = 白
+    for (index, color) in code.to_colors().iter().enumerate() {
+        let x = index % size;
+        let y = index / size;
+        if *color == qrcode::Color::Dark {
+            modules[(y + quiet) * width + (x + quiet)] = true;
+        }
+    }
+    (width, modules)
 }
 
 /// Centered card: QR on top, status and hints underneath.
 #[derive(Clone)]
 struct LoginWidget {
-    qr_lines: Vec<Line<'static>>,
+    /// (含白边宽度, 暗模块表);None 表示尚未生成。
+    qr: Option<(usize, Vec<bool>)>,
     status: String,
 }
 
@@ -147,11 +151,13 @@ impl Widget for LoginWidget {
         block.render(area, buf);
 
         // Title / status / QR / hint, the group centered in the card.
-        let qr_height = self.qr_lines.len() as u16;
+        // 二维码:每模块 1 列宽、半个字符行高(半块字符)。
+        let qr_cols = self.qr.as_ref().map(|(width, _)| *width as u16).unwrap_or(0);
+        let qr_rows = qr_cols.div_ceil(2);
         let chunks: [Rect; 4] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(qr_height.max(1)),
+            Constraint::Length(qr_rows.max(1)),
             Constraint::Length(1),
         ])
         .flex(Flex::Center)
@@ -163,10 +169,8 @@ impl Widget for LoginWidget {
         Paragraph::new(Line::from(self.status).centered())
             .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
             .render(chunks[1], buf);
-        if !self.qr_lines.is_empty() {
-            Paragraph::new(self.qr_lines)
-                .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
-                .render(chunks[2], buf);
+        if let Some((width, modules)) = &self.qr {
+            draw_qr(buf, chunks[2], *width, modules);
         }
         let hint = if crate::backend::mock_mode() {
             "mock 模式:二维码会自动走完 扫码 → 确认 → 登录成功"
@@ -179,21 +183,52 @@ impl Widget for LoginWidget {
     }
 }
 
+/// 白底黑块直绘:整块区域铺白,暗模块以黑色半块字符呈现
+/// (一个终端字符行承载两行模块)。
+fn draw_qr(buf: &mut ratatui_kit::ratatui::buffer::Buffer, area: Rect, width: usize, modules: &[bool]) {
+    let style = Style::new().fg(ratatui_kit::ratatui::style::Color::Black)
+        .bg(ratatui_kit::ratatui::style::Color::White);
+    let dark = |x: usize, y: usize| -> bool {
+        x < width && y < width && modules[y * width + x]
+    };
+    for row in 0..area.height as usize {
+        let top = row * 2;
+        for col in 0..(area.width as usize).min(width) {
+            let upper = dark(col, top);
+            let lower = dark(col, top + 1);
+            let symbol = match (upper, lower) {
+                (true, true) => "\u{2588}",   // █ 全黑
+                (true, false) => "\u{2580}",  // ▀ 上黑
+                (false, true) => "\u{2584}",  // ▄ 下黑
+                (false, false) => " ",        // 白底
+            };
+            let cell = &mut buf[(area.x + col as u16, area.y + row as u16)];
+            cell.set_symbol(symbol);
+            cell.set_style(style);
+        }
+        // 右侧若因宽度不足有富余,同样铺白保持方形背景。
+        for col in (area.width as usize).min(width)..area.width as usize {
+            let cell = &mut buf[(area.x + col as u16, area.y + row as u16)];
+            cell.set_symbol(" ");
+            cell.set_style(style);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn qr_has_square_layout() {
-        let lines = render_qr("https://uunet.example/qr/test");
-        let width = lines[0].width();
+    fn qr_matrix_has_quiet_zone_and_square_shape() {
+        let (width, modules) = qr_matrix("https://uunet.example/qr/test");
         assert!(width > 10, "qr too narrow: {width}");
-        assert_eq!(
-            lines.iter().map(|l| l.width()).collect::<Vec<_>>(),
-            vec![width; lines.len()],
-            "qr rows must share one width"
-        );
-        // Dense1x2 packs two module rows into one character row.
-        assert!(lines.len() * 2 >= width / 2, "qr looks stretched");
+        assert_eq!(modules.len(), width * width, "matrix must be square");
+        // 白边静区:四角 2x2 全为白。
+        for (x, y) in [(0, 0), (1, 1), (width - 1, width - 1), (width - 2, width - 2)] {
+            assert!(!modules[y * width + x], "quiet zone at ({x},{y}) must be white");
+        }
+        // 码区存在暗模块。
+        assert!(modules.iter().any(|dark| *dark), "qr has no dark modules");
     }
 }
