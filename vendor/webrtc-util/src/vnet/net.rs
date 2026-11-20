@@ -446,7 +446,20 @@ impl Net {
     }
 
     fn native_interfaces_result() -> Result<Vec<Interface>> {
-        let interfaces = ifaces::ifaces()?;
+        let interfaces = match ifaces::ifaces() {
+            Ok(interfaces) => interfaces,
+            Err(error) => {
+                // getifaddrs/netlink 被沙箱或安全策略拒绝(EACCES 等)时,
+                // 用 UDP connect 探测默认路由出口地址(connect 不发包,只查
+                // 路由表),伪造单接口快照,保证 ICE 至少能在默认路由上
+                // 收集 STUN/中继候选。
+                log::warn!(
+                    "native interface enumeration failed ({error}); \
+                     fabricating a default-route interface for ICE gathering"
+                );
+                return Self::default_route_interfaces();
+            }
+        };
 
         let mut m: HashMap<String, (Vec<IpNet>, u32)> = HashMap::new();
         for iface in interfaces {
@@ -470,6 +483,34 @@ impl Net {
         }
 
         Ok(ifs)
+    }
+
+    /// 无 netlink 环境的回退接口:仅覆盖默认路由,到对端的其他路径会
+    /// 退化为中继候选;系统放开 netlink 后本路径自动不再触发。
+    fn default_route_interfaces() -> Result<Vec<Interface>> {
+        let mut addrs: Vec<IpNet> = Vec::new();
+        for (marker, v6) in [("8.8.8.8:80", false), ("[2606:4700:4700::1111]:80", true)] {
+            let bind = if v6 { "[::]:0" } else { "0.0.0.0:0" };
+            let Ok(socket) = std::net::UdpSocket::bind(bind) else {
+                continue;
+            };
+            if socket.connect(marker).is_ok() {
+                if let Ok(local) = socket.local_addr() {
+                    addrs.push(Interface::convert(local, None)?);
+                }
+            }
+        }
+        if addrs.is_empty() {
+            return Err(crate::Error::from(std::io::Error::new(
+                std::io::ErrorKind::AddrNotAvailable,
+                "no usable default route for the interface fallback",
+            )));
+        }
+        Ok(vec![Interface::new_with_adapter_type(
+            "default-route".into(),
+            addrs,
+            0,
+        )])
     }
 
     fn native_interfaces() -> Vec<Interface> {
