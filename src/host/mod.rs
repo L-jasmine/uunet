@@ -27,10 +27,13 @@ pub enum HostState {
 #[derive(Clone)]
 pub struct HostHandle {
     pub state: tokio::sync::watch::Receiver<HostState>,
+    #[allow(dead_code)]
     cancel: CancellationToken,
 }
 
 impl HostHandle {
+    /// 进程内单例常驻,目前无停止入口;保留开关供后续使用。
+    #[allow(dead_code)]
     pub async fn stop(self) {
         self.cancel.cancel();
     }

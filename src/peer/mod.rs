@@ -7,6 +7,7 @@
 pub(crate) mod controller;
 pub(crate) mod handshake;
 
+#[allow(unused_imports)]
 use crate::kcp::{ControlReceiver, UuKcpControl};
 use crate::pb;
 use crate::rtc::ConnectionCore;
@@ -18,7 +19,8 @@ use std::sync::{
 };
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use tokio_util::sync::CancellationToken;
-use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_HEVC, MIME_TYPE_OPUS};
+use webrtc::api::media_engine::{MIME_TYPE_H264, MIME_TYPE_HEVC, MIME_TYPE_OPUS, MediaEngine};
+#[allow(unused_imports)]
 use webrtc::data_channel::{RTCDataChannel, data_channel_state::RTCDataChannelState};
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -32,7 +34,9 @@ use webrtc::track::track_local::{TrackLocal, track_local_static_rtp::TrackLocalS
 pub(crate) struct Peer {
     core: ConnectionCore,
     cancel: CancellationToken,
+    #[allow(dead_code)]
     connected: Arc<AtomicBool>,
+    #[allow(dead_code)]
     kcp: UuKcpControl,
     handshake: handshake::HostHandshake,
     control_channel: Arc<std::sync::Mutex<Option<std::sync::Weak<RTCDataChannel>>>>,
@@ -56,7 +60,10 @@ impl Peer {
         ice_servers: Vec<RTCIceServer>,
         relay: bool,
         cancel: CancellationToken,
-    ) -> Result<(Self, mpsc::UnboundedReceiver<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>)> {
+    ) -> Result<(
+        Self,
+        mpsc::UnboundedReceiver<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>,
+    )> {
         let mut media = MediaEngine::default();
         register_codecs(&mut media)?;
         // 数据型会话不发媒体;空 Registry 即可。
@@ -145,7 +152,11 @@ impl Peer {
     }
 
     /// 按标签绑定数据通道:CONTROL→PB 握手(+H2 KCP),FILE→端口转发(H2)。
-    fn bind_channels(&self, connection: Arc<webrtc::peer_connection::RTCPeerConnection>, ports: crate::forward::host::Receiver) -> Result<()> {
+    fn bind_channels(
+        &self,
+        connection: Arc<webrtc::peer_connection::RTCPeerConnection>,
+        ports: crate::forward::host::Receiver,
+    ) -> Result<()> {
         let handshake = self.handshake.clone();
         let control_channel = Arc::clone(&self.control_channel);
         let cancel = self.cancel.clone();
@@ -288,7 +299,8 @@ impl Peer {
             .map(str::to_owned)
             .collect();
         anyhow::ensure!(!fragments.is_empty(), "主控SDP缺少ICE代次");
-        let description = webrtc::peer_connection::sdp::session_description::RTCSessionDescription::offer(sdp)?;
+        let description =
+            webrtc::peer_connection::sdp::session_description::RTCSessionDescription::offer(sdp)?;
         let _ = restart;
         let mut ice = self.remote_ice.lock().await;
         self.core
@@ -332,7 +344,11 @@ impl Peer {
         if self.ended() {
             return Ok(());
         }
-        if candidate.username_fragment.as_ref().is_none_or(String::is_empty) {
+        if candidate
+            .username_fragment
+            .as_ref()
+            .is_none_or(String::is_empty)
+        {
             candidate.username_fragment = ufrag_of(&candidate.candidate);
         }
         let mut ice = self.remote_ice.lock().await;
@@ -385,6 +401,7 @@ impl Peer {
         Some(candidate)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
     }

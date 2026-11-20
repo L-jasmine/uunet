@@ -5,9 +5,14 @@
 //! FILE+PB 就绪 → 按 host.json…(规则文件 `~/.config/uunet/rules/<device>.json`)
 //! 中 enabled 的规则启动本地监听。规则文件变化在 500ms 内生效。
 
-use crate::backend::{identity, nrd::{self, CallError}, session};
+use crate::backend::{
+    identity,
+    nrd::{self, CallError},
+    session,
+};
 use crate::forward::{self, Rule};
 use crate::peer::controller::ControllerPeer;
+#[allow(unused_imports)]
 use crate::signal::{self, SignalFailure, SignalRole, SignalSession};
 use anyhow::{Result, anyhow};
 use std::{
@@ -76,7 +81,10 @@ fn statuses() -> &'static Mutex<HashMap<String, MappingStatus>> {
 }
 
 pub(crate) fn set_status(device_id: &str, status: MappingStatus) {
-    statuses().lock().unwrap().insert(device_id.to_string(), status);
+    statuses()
+        .lock()
+        .unwrap()
+        .insert(device_id.to_string(), status);
 }
 
 pub(crate) fn mapping_status(device_id: &str) -> MappingStatus {
@@ -107,11 +115,23 @@ pub fn connect(device_id: &str) -> Result<()> {
     drop(cancels);
     let device = device_id.to_string();
     tokio::spawn(async move {
-        set_status(&device, MappingStatus { state: "连接中".into(), ..Default::default() });
+        set_status(
+            &device,
+            MappingStatus {
+                state: "连接中".into(),
+                ..Default::default()
+            },
+        );
         let outcome = run_session(&device, cancel.clone()).await;
         crate::controller::drop_cancel(&device);
         match outcome {
-            Ok(()) => set_status(&device, MappingStatus { state: "已断开".into(), ..Default::default() }),
+            Ok(()) => set_status(
+                &device,
+                MappingStatus {
+                    state: "已断开".into(),
+                    ..Default::default()
+                },
+            ),
             Err(error) => {
                 tracing::error!("主控映射会话失败(target={device}):{error:#}");
                 set_status(
@@ -147,6 +167,8 @@ pub(crate) fn is_running(device_id: &str) -> bool {
 
 async fn run_session(device_id: &str, cancel: CancellationToken) -> Result<()> {
     let stored = session::load()?.ok_or_else(|| anyhow!("未登录:没有已保存的会话"))?;
+    // 设备号已随 ensure_registered 落库;本函数暂不直接使用,保留备查。
+    #[allow(unused_variables)]
     let my_device_id = identity::ensure_registered().await?.device_id;
     let mut client = nrd::NrdClient::new(identity::ensure_registered().await?)?;
     client.set_account(&stored.user_id, &stored.token);
@@ -170,15 +192,20 @@ async fn run_session(device_id: &str, cancel: CancellationToken) -> Result<()> {
     let info = signal_session.start_control(frames).await?;
 
     let session_cancel = cancel.child_token();
-    let (peer, mut candidates) =
-        ControllerPeer::new(info.ice_servers_struct(), info.force_relay, session_cancel.clone())
-            .await?;
+    let (peer, mut candidates) = ControllerPeer::new(
+        info.ice_servers_struct(),
+        info.force_relay,
+        session_cancel.clone(),
+    )
+    .await?;
     signal_session
         .negotiate(&info, &peer, &mut candidates)
         .await?;
     tracing::info!(target = %device_id, "controller session negotiated");
 
     // FILE 通道 + PB 握手就绪(omarchyuu wait_port_mapping_ready 等价)。
+    // 超时错误有意吞掉:ended() 分支直接返回,由后续监听/echo 失败兜底。
+    #[allow(unused_must_use)]
     tokio::time::timeout(std::time::Duration::from_secs(15), async {
         loop {
             if peer.file_ready() && peer.handshake_connected() {
@@ -194,30 +221,34 @@ async fn run_session(device_id: &str, cancel: CancellationToken) -> Result<()> {
     .map_err(|_| anyhow!("转发通道或握手未在 15 秒内就绪"));
     tracing::info!(target = %device_id, "controller forwarding ready");
 
-    set_status(device_id, MappingStatus { state: "已连接".into(), ..Default::default() });
+    set_status(
+        device_id,
+        MappingStatus {
+            state: "已连接".into(),
+            ..Default::default()
+        },
+    );
 
     // 规则监听管理:500ms 轮询规则文件,对齐期望集合。
     let transport = peer.transport();
     let mut listeners: HashMap<u64, (Rule, CancellationToken, Arc<Mutex<forward::RuleStatus>>)> =
         HashMap::new();
     let (probe_notify, _probe_watch) = tokio::sync::watch::channel(());
+    #[allow(unused_mut)]
     let mut keep_alive_shutdown = tokio::sync::oneshot::channel();
-    let alive = signal_session.keep_alive_controller(
-        keep_alive_shutdown.1,
-        peer,
-        candidates,
-        info,
-    );
+    let alive = signal_session.keep_alive_controller(keep_alive_shutdown.1, peer, candidates, info);
     tokio::pin!(alive);
     let outcome = loop {
         if cancel.is_cancelled() {
             let _ = keep_alive_shutdown.0.send(());
             break Ok(());
         }
-        let desired: Vec<Rule> = load_rules(device_id).into_iter().filter(|r| r.enabled).collect();
+        let desired: Vec<Rule> = load_rules(device_id)
+            .into_iter()
+            .filter(|r| r.enabled)
+            .collect();
         // 移除不再期望的监听
-        let desired_ids: std::collections::HashSet<u64> =
-            desired.iter().map(|r| r.id).collect();
+        let desired_ids: std::collections::HashSet<u64> = desired.iter().map(|r| r.id).collect();
         let stale: Vec<u64> = listeners
             .keys()
             .filter(|id| !desired_ids.contains(id))
@@ -260,9 +291,9 @@ async fn run_session(device_id: &str, cancel: CancellationToken) -> Result<()> {
             .values()
             .filter(|(_, _, status)| lock_status(status).listening)
             .count();
-        let error = listeners.values().find_map(|(_, _, status)| {
-            lock_status(status).error.clone()
-        });
+        let error = listeners
+            .values()
+            .find_map(|(_, _, status)| lock_status(status).error.clone());
         set_status(
             device_id,
             MappingStatus {
@@ -285,11 +316,15 @@ async fn run_session(device_id: &str, cancel: CancellationToken) -> Result<()> {
     outcome
 }
 
+// 名称沿用 omarchyuu `HostClient::invalid` 的移植痕迹,保留原拼写以便对照。
+#[allow(non_snake_case)]
 fn HostClient_invalid(code: i32) -> bool {
     matches!(code, 1001 | 1002 | 1120)
 }
 
-fn lock_status(status: &Arc<Mutex<forward::RuleStatus>>) -> std::sync::MutexGuard<'_, forward::RuleStatus> {
+fn lock_status(
+    status: &Arc<Mutex<forward::RuleStatus>>,
+) -> std::sync::MutexGuard<'_, forward::RuleStatus> {
     status.lock().unwrap_or_else(|e| e.into_inner())
 }
 

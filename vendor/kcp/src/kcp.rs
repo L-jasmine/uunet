@@ -916,6 +916,7 @@ impl<Output> Kcp<Output> {
         }
 
         let mut ts_flush = self.ts_flush;
+        #[allow(deprecated)]
         let mut tm_packet = u32::max_value();
 
         if timediff(current, ts_flush) >= 10000 || timediff(current, ts_flush) < -10000 {
@@ -1232,6 +1233,7 @@ impl<Output: Write> Kcp<Output> {
         let resent = if self.fastresend > 0 {
             self.fastresend
         } else {
+            #[allow(deprecated)]
             u32::max_value()
         };
 
@@ -1479,6 +1481,7 @@ impl<Output: AsyncWrite + Unpin> Kcp<Output> {
         let resent = if self.fastresend > 0 {
             self.fastresend
         } else {
+            #[allow(deprecated)]
             u32::max_value()
         };
 

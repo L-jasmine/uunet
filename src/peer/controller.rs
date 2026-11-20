@@ -5,10 +5,10 @@
 //! video),但无媒体收发;CONTROL 通道承载 PB ECHO 握手,固定纯 SCTP
 //! 载体(offer 不写 `a=x-uuremote-mix-kcp`,KCP 载体留待后续)。
 
-use crate::rtc::ConnectionCore;
-use crate::rtc::negotiation::{register_uu_codecs, register_uu_header_extensions};
 use crate::forward;
 use crate::pb;
+use crate::rtc::ConnectionCore;
+use crate::rtc::negotiation::{register_uu_codecs, register_uu_header_extensions};
 use anyhow::{Context, Result};
 use std::collections::{HashSet, VecDeque};
 use std::sync::{
@@ -24,8 +24,8 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy;
 use webrtc::rtp_transceiver::RTCRtpTransceiverInit;
-use webrtc::rtp_transceiver::rtp_transceiver_direction::RTCRtpTransceiverDirection;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTPCodecType};
+use webrtc::rtp_transceiver::rtp_transceiver_direction::RTCRtpTransceiverDirection;
 use webrtc::track::track_local::{TrackLocal, track_local_static_rtp::TrackLocalStaticRTP};
 
 const PB_CONNECT_MAX_ATTEMPTS: u32 = 30;
@@ -54,6 +54,7 @@ pub(crate) struct ControllerPeer {
     connected: Arc<AtomicBool>,
     handshake_connected: Arc<AtomicBool>,
     transport: Arc<forward::Transport>,
+    #[allow(dead_code)]
     control: Arc<RTCDataChannel>,
     remote_ice: AsyncMutex<RemoteIce>,
 }
@@ -105,8 +106,14 @@ impl ControllerPeer {
         connection.on_peer_connection_state_change(Box::new(move |state| {
             use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
             tracing::info!(?state, "controller peer connection state changed");
-            state_connected.store(state == RTCPeerConnectionState::Connected, Ordering::Release);
-            if matches!(state, RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed) {
+            state_connected.store(
+                state == RTCPeerConnectionState::Connected,
+                Ordering::Release,
+            );
+            if matches!(
+                state,
+                RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
+            ) {
                 state_cancel.cancel();
             }
             Box::pin(async {})
@@ -184,7 +191,12 @@ impl ControllerPeer {
             control: control.clone(),
             remote_ice: AsyncMutex::new(RemoteIce::default()),
         };
-        peer.wire_control(&control, handshake_connected.clone(), attempts, cancel.clone());
+        peer.wire_control(
+            &control,
+            handshake_connected.clone(),
+            attempts,
+            cancel.clone(),
+        );
         peer.wire_file(&file, transport, cancel);
         construction.disarm();
         Ok((peer, candidates))
@@ -266,9 +278,16 @@ impl ControllerPeer {
         }));
     }
 
-    fn wire_file(&self, file: &Arc<RTCDataChannel>, transport: Arc<forward::Transport>, cancel: CancellationToken) {
+    fn wire_file(
+        &self,
+        file: &Arc<RTCDataChannel>,
+        transport: Arc<forward::Transport>,
+        cancel: CancellationToken,
+    ) {
         transport.bind(file);
         let wake_transport = transport.clone();
+        // 注册即生效,返回值无需使用。
+        #[allow(unused_must_use)]
         file.on_buffered_amount_low(Box::new(move || {
             wake_transport.wake();
             Box::pin(async {})
@@ -305,7 +324,11 @@ impl ControllerPeer {
             .map(str::to_owned)
             .collect();
         let mixed = crate::rtc::negotiation::negotiated_mixed_kcp_version(&sdp)?;
-        tracing::info!(sdp_bytes = sdp.len(), ?mixed, "controller installing remote answer");
+        tracing::info!(
+            sdp_bytes = sdp.len(),
+            ?mixed,
+            "controller installing remote answer"
+        );
         let description =
             webrtc::peer_connection::sdp::session_description::RTCSessionDescription::answer(sdp)?;
         let mut ice = self.remote_ice.lock().await;
@@ -347,7 +370,11 @@ impl ControllerPeer {
         if self.ended() {
             return Ok(());
         }
-        if candidate.username_fragment.as_ref().is_none_or(String::is_empty) {
+        if candidate
+            .username_fragment
+            .as_ref()
+            .is_none_or(String::is_empty)
+        {
             candidate.username_fragment = ufrag_of(&candidate.candidate);
         }
         let mut ice = self.remote_ice.lock().await;
@@ -420,6 +447,8 @@ impl ControllerPeer {
         self.cancel.is_cancelled()
     }
 
+    /// 会话结束由信令侧统一关闭;保留显式关闭入口。
+    #[allow(dead_code)]
     pub(crate) async fn close(&self) -> Result<()> {
         self.cancel.cancel();
         self.transport.close();

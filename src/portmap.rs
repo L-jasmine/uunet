@@ -49,6 +49,7 @@ pub fn PortMap(props: &mut PortMapProps, mut hooks: Hooks) -> impl Into<AnyEleme
     let mut f_port = hooks.use_state(String::new);
     let mut form_error = hooks.use_state(String::new);
     let mut confirm_id = hooks.use_state(|| None::<u64>);
+    #[allow(unused_mut)]
     let mut session_status = hooks.use_state(|| String::new());
 
     let device_id_for_load = device_id.clone();
@@ -139,6 +140,7 @@ pub fn PortMap(props: &mut PortMapProps, mut hooks: Hooks) -> impl Into<AnyEleme
                 if let Some(rule) = current.get(selected.get()) {
                     let mut toggled = rule.clone();
                     toggled.enabled = !toggled.enabled;
+                    #[allow(unused_mut)]
                     match persist_rules(&device_id_for_form, |mut all| {
                         replace_rule(all, toggled.clone())
                     }) {
@@ -317,16 +319,8 @@ fn handle_form_key(
                 EventResult::Consumed
             } else {
                 submit_form(
-                    device_id,
-                    f_name,
-                    f_proto,
-                    f_local,
-                    f_target,
-                    f_port,
-                    form_error,
-                    form_open,
-                    rules,
-                    selected,
+                    device_id, f_name, f_proto, f_local, f_target, f_port, form_error, form_open,
+                    rules, selected,
                 )
             }
         }
@@ -491,10 +485,7 @@ impl Widget for HeaderWidget {
                 self.title, self.total, self.enabled
             )
             .into(),
-            ratatui_kit::ratatui::text::Span::styled(
-                format!("[{}]", self.session),
-                session_style,
-            ),
+            ratatui_kit::ratatui::text::Span::styled(format!("[{}]", self.session), session_style),
         ]))
         .render(area, buf);
     }
@@ -512,11 +503,9 @@ struct RulesWidget {
 impl Widget for RulesWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
         let frame = if self.reserved_bottom > 0 {
-            let chunks: [Rect; 2] = Layout::vertical([
-                Constraint::Min(3),
-                Constraint::Length(self.reserved_bottom),
-            ])
-            .areas(area);
+            let chunks: [Rect; 2] =
+                Layout::vertical([Constraint::Min(3), Constraint::Length(self.reserved_bottom)])
+                    .areas(area);
             chunks[0]
         } else {
             area
@@ -547,14 +536,28 @@ impl Widget for RulesWidget {
         for (idx, chunk) in header.iter().enumerate() {
             Paragraph::new(Line::from(labels[idx]).dark_gray()).render(*chunk, buf);
         }
-        let rows_area = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+        let rows_area = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
         for (row_idx, rule) in self.rules.iter().skip(skip).take(visible).enumerate() {
             let is_selected = skip + row_idx == self.selected;
             // 每行单独切列(整块切列会互相覆盖)。
-            let row_rect = Rect::new(rows_area.x, rows_area.y + row_idx as u16, rows_area.width, 1);
+            let row_rect = Rect::new(
+                rows_area.x,
+                rows_area.y + row_idx as u16,
+                rows_area.width,
+                1,
+            );
             let cells: [Rect; 6] = Layout::horizontal(columns).areas(row_rect);
             let values = [
-                if rule.enabled { "●".to_string() } else { "○".to_string() },
+                if rule.enabled {
+                    "●".to_string()
+                } else {
+                    "○".to_string()
+                },
                 rule.name.clone(),
                 rule.protocol.label().to_string(),
                 format!(":{}", rule.local_port),
@@ -575,11 +578,9 @@ impl Widget for RulesWidget {
             }
         }
         if self.rules.is_empty() {
-            Paragraph::new(
-                Line::from("还没有规则,按 a 新增一条".dark_gray()).centered(),
-            )
-            .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
-            .render(rows_area, buf);
+            Paragraph::new(Line::from("还没有规则,按 a 新增一条".dark_gray()).centered())
+                .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
+                .render(rows_area, buf);
         }
     }
 }
@@ -608,11 +609,9 @@ impl Widget for FormWidget {
                 Style::new()
             };
             let cursor = if *active { "_" } else { "" };
-            Paragraph::new(
-                Line::from(format!("{marker}{label:<6} {value}{cursor}")).style(style),
-            )
-            .style(style)
-            .render(*row, buf);
+            Paragraph::new(Line::from(format!("{marker}{label:<6} {value}{cursor}")).style(style))
+                .style(style)
+                .render(*row, buf);
         }
         if !self.error.is_empty() {
             Paragraph::new(Line::from(self.error).red()).render(inner, buf);

@@ -7,6 +7,8 @@ pub(crate) mod core;
 pub(crate) mod negotiation;
 
 pub(crate) use core::ConnectionCore;
+// 全量 re-export 保持与 omarchyuu 对齐;未用项后续 KCP/视频路线再用。
+#[allow(unused_imports)]
 pub(crate) use negotiation::{
     MAX_DATA_CHANNEL_MESSAGE_SIZE, apply_uu_application_attributes_for_role,
     negotiated_mixed_kcp_version, register_uu_codecs, register_uu_header_extensions,

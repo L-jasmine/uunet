@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// UU SDK VideoCodec::AV1。
+#[allow(dead_code)]
 pub(crate) const AV1_CODEC_ID: i32 = 5;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]

@@ -161,12 +161,14 @@ impl Widget for DevicesHeaderWidget {
         } else {
             format!("   {}", self.host_status)
         };
-        Paragraph::new(Line::from(format!(
-            " uunet 设备列表   共 {} 台,在线 {} 台{}",
-            self.total, self.online, suffix
-        ))
-        .cyan()
-        .bold())
+        Paragraph::new(
+            Line::from(format!(
+                " uunet 设备列表   共 {} 台,在线 {} 台{}",
+                self.total, self.online, suffix
+            ))
+            .cyan()
+            .bold(),
+        )
         .render(area, buf);
     }
 }
@@ -208,16 +210,30 @@ impl Widget for DevicesWidget {
         for (idx, chunk) in header.iter().enumerate() {
             Paragraph::new(Line::from(labels[idx]).dark_gray()).render(*chunk, buf);
         }
-        let rows_area = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+        let rows_area = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
         for (row_idx, device) in self.devices.iter().skip(skip).take(visible).enumerate() {
             // One terminal row per device; column rects must be cut from that
             // single row, not from the whole rows area (rows would overwrite
             // each other at the top).
-            let row_rect = Rect::new(rows_area.x, rows_area.y + row_idx as u16, rows_area.width, 1);
+            let row_rect = Rect::new(
+                rows_area.x,
+                rows_area.y + row_idx as u16,
+                rows_area.width,
+                1,
+            );
             let cells: [Rect; 5] = Layout::horizontal(columns).areas(row_rect);
             let is_selected = skip + row_idx == self.selected;
             let values = [
-                if device.online { "●".to_string() } else { "○".to_string() },
+                if device.online {
+                    "●".to_string()
+                } else {
+                    "○".to_string()
+                },
                 device.name.clone(),
                 device.os.clone(),
                 device.detail.clone(),
@@ -256,10 +272,8 @@ struct DevicesHelpWidget;
 impl Widget for DevicesHelpWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
         Paragraph::new(
-            Line::from(
-                " ↑/↓ 选择   Enter 端口映射   h 被控   r 刷新   q 退出 ".dark_gray(),
-            )
-            .centered(),
+            Line::from(" ↑/↓ 选择   Enter 端口映射   h 被控   r 刷新   q 退出 ".dark_gray())
+                .centered(),
         )
         .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
         .render(area, buf);
@@ -274,15 +288,36 @@ mod tests {
     #[test]
     fn devices_widget_renders_rows_and_status() {
         let devices = vec![
-            Device { id: "dev-1".into(), name: "office-nas".into(), os: "Linux".into(), detail: "2.1.0".into(), online: true },
-            Device { id: "dev-2".into(), name: "lab-server".into(), os: "Linux".into(), detail: "2.1.0".into(), online: false },
+            Device {
+                id: "dev-1".into(),
+                name: "office-nas".into(),
+                os: "Linux".into(),
+                detail: "2.1.0".into(),
+                online: true,
+            },
+            Device {
+                id: "dev-2".into(),
+                name: "lab-server".into(),
+                os: "Linux".into(),
+                detail: "2.1.0".into(),
+                online: false,
+            },
         ];
         let area = Rect::new(0, 0, 80, 10);
         let mut buf = Buffer::empty(area);
-        DevicesWidget { devices, selected: 1, error: String::new() }.render(area, &mut buf);
+        DevicesWidget {
+            devices,
+            selected: 1,
+            error: String::new(),
+        }
+        .render(area, &mut buf);
 
         let rows: Vec<String> = (0..area.height)
-            .map(|y| (0..area.width).map(|x| buf[(x, y)].symbol().to_string()).collect())
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect()
+            })
             .collect();
         // Wide (CJK) characters occupy two buffer cells; collapse spaces so
         // labels can be matched regardless of column packing.

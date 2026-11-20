@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use prost::Message as _;
+#[allow(unused_imports)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// omarchyuu `stream_control::ACTION_TYPE_ECHO_REQUEST`。
@@ -212,6 +213,7 @@ pub(crate) struct Received {
     /// 收到主控 ECHO_RESPONSE(action 1):主控确认了我们的握手。
     pub handshake_complete: bool,
     /// 收到主控 ECHO_REQUEST(action 0):需要回 ECHO_RESPONSE。
+    #[allow(dead_code)]
     pub handshake_request: bool,
     /// 需要回发的字节(publisher::receive 的 messages)。
     pub messages: Vec<Vec<u8>>,
@@ -325,7 +327,11 @@ pub(crate) fn build_port_mapping_connect_frames(
         11,
         &PbFeatureFlag::read_only_viewer().encode_to_vec(),
     );
-    bytes_field(&mut options, 12, crate::backend::nrd::CLIENT_VERSION.as_bytes());
+    bytes_field(
+        &mut options,
+        12,
+        crate::backend::nrd::CLIENT_VERSION.as_bytes(),
+    );
     Ok(ControlFrames {
         header: format!("451-{ack_id}{}", serde_json::to_string(&event)?),
         attachment: options,
@@ -358,7 +364,9 @@ pub(crate) mod wire {
 }
 
 /// 数据型会话 kind:5 文件 / 8 终端 / 9 端口转发(omarchyuu signal/host.rs:347)。
+#[allow(dead_code)]
 pub(crate) const CONNECT_KIND_FILE: i32 = 5;
+#[allow(dead_code)]
 pub(crate) const CONNECT_KIND_TERMINAL: i32 = 8;
 pub(crate) const CONNECT_KIND_PORTS: i32 = 9;
 
@@ -386,10 +394,16 @@ mod tests {
     fn port_mapping_frame_round_trips_through_envelope() {
         let frame = vec![1_u8, 2, 3, 4];
         let envelope = encode_port_mapping(frame.clone());
-        let decoded = decode_port_mapping(&envelope).expect("decode").expect("is ports");
+        let decoded = decode_port_mapping(&envelope)
+            .expect("decode")
+            .expect("is ports");
         assert_eq!(decoded, frame);
         // 非 tag 27 载荷解出 None。
-        assert!(decode_port_mapping(&echo_request(1, 0)).expect("decode").is_none());
+        assert!(
+            decode_port_mapping(&echo_request(1, 0))
+                .expect("decode")
+                .is_none()
+        );
     }
 
     #[test]

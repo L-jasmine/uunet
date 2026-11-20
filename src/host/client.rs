@@ -3,7 +3,11 @@
 //! 只保留被控在线需要的四个动作:设备号、创建房间、可控位、账号失效清理。
 //! 信令传输不在这一层(在 `crate::signal`)。
 
-use crate::backend::{identity, nrd::{self}, session};
+use crate::backend::{
+    identity,
+    nrd::{self},
+    session,
+};
 use anyhow::{Result, anyhow};
 
 #[derive(Clone)]

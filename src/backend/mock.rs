@@ -48,6 +48,7 @@ fn devices() -> &'static Mutex<Vec<Device>> {
 }
 
 /// Rules are stored per device; ids are unique across the whole network.
+#[allow(dead_code)]
 fn rules() -> &'static Mutex<HashMap<String, Vec<Rule>>> {
     static R: OnceLock<Mutex<HashMap<String, Vec<Rule>>>> = OnceLock::new();
     R.get_or_init(|| {
@@ -125,6 +126,8 @@ pub async fn list_devices() -> anyhow::Result<Vec<Device>> {
     Ok(devices().lock().unwrap().clone())
 }
 
+// 规则 API 已被 controller 的真实持久化取代,mock 侧保留供回退使用。
+#[allow(dead_code)]
 pub fn list_rules(device_id: &str) -> Vec<Rule> {
     rules()
         .lock()
@@ -136,16 +139,11 @@ pub fn list_rules(device_id: &str) -> Vec<Rule> {
 
 /// Validates the form and stores a new rule on the device; the error
 /// message goes straight into the UI's form error line.
+#[allow(dead_code)]
 pub fn add_rule(device_id: &str, form: &RuleForm) -> Result<Rule, String> {
     validate(form)?;
     let mut store = rules().lock().unwrap();
-    let id = store
-        .values()
-        .flatten()
-        .map(|r| r.id)
-        .max()
-        .unwrap_or(0)
-        + 1;
+    let id = store.values().flatten().map(|r| r.id).max().unwrap_or(0) + 1;
     let rule = Rule {
         id,
         name: form.name.trim().to_string(),
@@ -162,6 +160,7 @@ pub fn add_rule(device_id: &str, form: &RuleForm) -> Result<Rule, String> {
     Ok(rule)
 }
 
+#[allow(dead_code)]
 pub fn toggle_rule(id: u64) {
     let mut store = rules().lock().unwrap();
     for list in store.values_mut() {
@@ -172,12 +171,14 @@ pub fn toggle_rule(id: u64) {
     }
 }
 
+#[allow(dead_code)]
 pub fn delete_rule(id: u64) {
     rules().lock().unwrap().values_mut().for_each(|list| {
         list.retain(|r| r.id != id);
     });
 }
 
+#[allow(dead_code)]
 fn validate(form: &RuleForm) -> Result<(), String> {
     if form.name.trim().is_empty() {
         return Err("名称不能为空".into());

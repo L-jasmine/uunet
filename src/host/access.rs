@@ -40,7 +40,8 @@ impl Lease {
     }
 
     pub(crate) fn port_changes(&self) -> tokio::sync::watch::Receiver<u64> {
-        static NEVER: std::sync::OnceLock<tokio::sync::watch::Sender<u64>> = std::sync::OnceLock::new();
+        static NEVER: std::sync::OnceLock<tokio::sync::watch::Sender<u64>> =
+            std::sync::OnceLock::new();
         NEVER
             .get_or_init(|| tokio::sync::watch::channel(0_u64).0)
             .subscribe()
@@ -58,8 +59,5 @@ impl Lease {
 
 /// 最近一次被控会话的统计(无会话时为零值)。
 pub(crate) fn current_status() -> crate::forward::host::Status {
-    ACTIVE
-        .get()
-        .map(|lease| lease.status())
-        .unwrap_or_default()
+    ACTIVE.get().map(|lease| lease.status()).unwrap_or_default()
 }

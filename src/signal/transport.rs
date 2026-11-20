@@ -45,6 +45,8 @@ pub(crate) enum SignalFailure {
     Rejected(String),
     Kicked,
     PublisherDisconnected,
+    /// omarchyuu 主控视频会话的失败分类;uunet 仅端口转发,保留枚举完整性。
+    #[allow(dead_code)]
     Peer(String),
 }
 

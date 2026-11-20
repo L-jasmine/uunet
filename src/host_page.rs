@@ -37,7 +37,9 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
     let mut f_port = hooks.use_state(String::new);
     let mut form_error = hooks.use_state(String::new);
     let mut confirm_idx = hooks.use_state(|| None::<usize>);
+    #[allow(unused_mut)]
     let mut host_state = hooks.use_state(|| "关闭".to_string());
+    #[allow(unused_mut)]
     let mut connections = hooks.use_state(|| (0_usize, 0_u64, 0_u64));
 
     // 被控状态与连接统计:后台循环刷新(与 devices 页同模式)。
@@ -72,6 +74,8 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
         });
     }
 
+    // ratatui-kit 的 use_state/use_exit 习惯上以 mut 接收;exit 暂未用到,保留。
+    #[allow(unused_mut, unused_variables)]
     let mut exit = hooks.use_exit();
     hooks.use_event_handler(EventScope::Current, EventPriority::Normal, move |event| {
         let Event::Key(key) = event else {
@@ -115,8 +119,11 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
                 let mut settings = shared.write().unwrap();
                 let index = min(selection.get(), settings.whitelist.len().saturating_sub(1));
                 if let Some(target) = settings.whitelist.get_mut(index) {
-                    target.proto =
-                        if target.proto == "tcp" { "udp".to_string() } else { "tcp".to_string() };
+                    target.proto = if target.proto == "tcp" {
+                        "udp".to_string()
+                    } else {
+                        "tcp".to_string()
+                    };
                 }
                 if let Err(error) = settings::save(&settings) {
                     tracing::error!(%error, "保存白名单失败");
@@ -142,7 +149,10 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
     });
 
     let settings_value = settings::shared().read().unwrap().clone();
-    let selected_value = min(selection.get(), settings_value.whitelist.len().saturating_sub(1));
+    let selected_value = min(
+        selection.get(),
+        settings_value.whitelist.len().saturating_sub(1),
+    );
     let form_rows = build_form_rows(
         field_idx.get(),
         &f_name.read().clone(),
@@ -344,12 +354,14 @@ struct HostHeaderWidget {
 
 impl Widget for HostHeaderWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
-        Paragraph::new(Line::from(format!(
-            " uunet 转发白名单   被控:{}   连接 {} 条 ↑{}/↓{}",
-            self.state, self.connections.0, self.connections.1, self.connections.2
-        ))
-        .cyan()
-        .bold())
+        Paragraph::new(
+            Line::from(format!(
+                " uunet 转发白名单   被控:{}   连接 {} 条 ↑{}/↓{}",
+                self.state, self.connections.0, self.connections.1, self.connections.2
+            ))
+            .cyan()
+            .bold(),
+        )
         .render(area, buf);
     }
 }
@@ -379,7 +391,8 @@ impl Widget for WhitelistWidget {
             Constraint::Length(8),
         ];
         let mut y = inner.y;
-        let header: [Rect; 4] = Layout::horizontal(columns).areas(Rect::new(inner.x, y, inner.width, 1));
+        let header: [Rect; 4] =
+            Layout::horizontal(columns).areas(Rect::new(inner.x, y, inner.width, 1));
         let labels = ["名称", "协议", "地址", "端口"];
         for (idx, chunk) in header.iter().enumerate() {
             Paragraph::new(Line::from(labels[idx]).dark_gray()).render(*chunk, buf);
@@ -406,9 +419,11 @@ impl Widget for WhitelistWidget {
             y += 1;
         }
         if self.settings.whitelist.is_empty() {
-            Paragraph::new(Line::from("白名单为空:任何转发拨号都会被拒绝,按 a 添加".dark_gray()).centered())
-                .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
-                .render(Rect::new(inner.x, y, inner.width, 1), buf);
+            Paragraph::new(
+                Line::from("白名单为空:任何转发拨号都会被拒绝,按 a 添加".dark_gray()).centered(),
+            )
+            .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
+            .render(Rect::new(inner.x, y, inner.width, 1), buf);
             y += 1;
         }
         if self.show_form {
@@ -445,10 +460,8 @@ struct HostHelpWidget;
 impl Widget for HostHelpWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
         Paragraph::new(
-            Line::from(
-                " ↑/↓ 选择   空格 切协议   a 添加   d 删除   Esc/q 返回设备 ".dark_gray(),
-            )
-            .centered(),
+            Line::from(" ↑/↓ 选择   空格 切协议   a 添加   d 删除   Esc/q 返回设备 ".dark_gray())
+                .centered(),
         )
         .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
         .render(area, buf);

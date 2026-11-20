@@ -11,6 +11,7 @@
 use crate::backend::nrd::RoomSession;
 use anyhow::{Context as _, Result, anyhow, bail};
 
+pub(crate) use negotiation::{ControlIceServer, ControlSessionInfo};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::future::pending;
@@ -20,12 +21,15 @@ use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 use transport::SignalTransport;
 pub(crate) use transport::{SignalFailure, SocketState};
-pub(crate) use negotiation::{ControlIceServer, ControlSessionInfo};
 pub use wire::{EnginePacket, SocketPacket, encode_event, encode_pong};
 pub(crate) use wire::{encode_binary_event, gzip_sdp};
 
+// 三个头名保留自 omarchyuu 的主控/重连路径,uunet 当前未走这些入口。
+#[allow(dead_code)]
 pub const AUTH_HEADER: &str = "X-NRD-AUTH";
+#[allow(dead_code)]
 pub const RECONNECT_HEADER: &str = "X-NRD-RECONN-KEY";
+#[allow(dead_code)]
 pub const CONTROLLING_HEADER: &str = "X-NRD-CONTROLLING";
 const STREAMER_VERSION_HEADER: &str = "streamer_version";
 const STREAMER_FLAG_HEADER: &str = "streamer_flag";
@@ -44,9 +48,9 @@ const RECONNECT_KEY_ACK_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const MAX_SDP_BYTES: u64 = 1024 * 1024;
 
 pub(crate) mod host;
+mod negotiation;
 mod tls;
 mod transport;
-mod negotiation;
 mod wire;
 
 /// Installs the process-wide rustls crypto provider once. Idempotent; a
@@ -91,10 +95,13 @@ impl SignalSession {
         self.transport.state_receiver()
     }
 
+    /// 入口封装;uunet 实际走 connect_observed(push 事件回传)。
+    #[allow(dead_code)]
     pub async fn connect(room: RoomSession, role: SignalRole) -> Result<Self> {
         Self::connect_cancellable(room, role, &tokio_util::sync::CancellationToken::new()).await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn connect_cancellable(
         room: RoomSession,
         role: SignalRole,
@@ -200,8 +207,8 @@ impl SignalSession {
                     if args.len() < 2 || args[0].as_str() != Some("success") {
                         bail!("目标设备拒绝了控制握手");
                     }
-                    let info: ControlSessionInfo = serde_json::from_value(args[1].clone())
-                        .context("控制握手 ACK 载荷异常")?;
+                    let info: ControlSessionInfo =
+                        serde_json::from_value(args[1].clone()).context("控制握手 ACK 载荷异常")?;
                     if info.code != 0
                         || info.client_id.is_empty()
                         || info.ice_id.is_empty()
@@ -329,7 +336,9 @@ impl SignalSession {
                 Ok(())
             }
             Err(_) => {
-                if let Some(handshake_failure) = peer.ended().then_some(()).and(None::<anyhow::Error>) {
+                if let Some(handshake_failure) =
+                    peer.ended().then_some(()).and(None::<anyhow::Error>)
+                {
                     return Err(handshake_failure);
                 }
                 anyhow::bail!("WebRTC 未能在官方 12 秒窗口内连接")
@@ -555,6 +564,8 @@ impl SignalSession {
         signal_result.and(socket_result)
     }
 
+    /// 优雅关闭;当前断线直接 drop,保留显式入口。
+    #[allow(dead_code)]
     pub(crate) async fn close(mut self) -> Result<()> {
         self.graceful_close().await
     }

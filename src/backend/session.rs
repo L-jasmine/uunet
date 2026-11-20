@@ -5,11 +5,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    io::Write,
-    path::PathBuf,
-};
+use std::{fs, io::Write, path::PathBuf};
 
 const SCHEMA: u8 = 1;
 
@@ -47,8 +43,8 @@ pub fn save(token: &str, user_id: &str, nickname: &str) -> Result<()> {
     let path = session_path();
     let dir = path.parent().expect("session 路径有父目录");
     fs::create_dir_all(dir).context("创建 uunet 配置目录失败")?;
-    let mut file = fs::File::create(&path)
-        .with_context(|| format!("创建会话文件失败: {}", path.display()))?;
+    let mut file =
+        fs::File::create(&path).with_context(|| format!("创建会话文件失败: {}", path.display()))?;
     file.write_all(serde_json::to_vec_pretty(&session)?.as_slice())?;
     #[cfg(unix)]
     {

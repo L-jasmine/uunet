@@ -11,11 +11,14 @@ mod backend;
 mod capability;
 mod controller;
 mod devices;
+// 以下两个模块整体保留(协议栈拷贝),当前仅部分路径启用,未用项暂不删除。
+#[allow(dead_code)]
 mod fec;
 mod forward;
 mod host;
-mod kcp;
 mod host_page;
+#[allow(dead_code)]
+mod kcp;
 mod login;
 mod pb;
 mod peer;
@@ -24,7 +27,11 @@ mod rtc;
 mod signal;
 
 #[derive(Parser)]
-#[command(name = "uunet", version, about = "uunet — 扫码登录 + 端口映射的终端组网工具")]
+#[command(
+    name = "uunet",
+    version,
+    about = "uunet — 扫码登录 + 端口映射的终端组网工具"
+)]
 struct Cli {
     /// 使用离线 mock 后端(不访问网络,二维码自动走完登录流程)
     #[arg(long)]

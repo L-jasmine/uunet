@@ -136,7 +136,10 @@ pub async fn restore_saved_session() -> RestoreOutcome {
         Err(error) => return RestoreOutcome::Failed(format!("{error:#}")),
     };
     client.set_account(&stored.user_id, &stored.token);
-    match client.get::<serde_json::Value>(nrd::USER_INFO_PATH, Scope::AccountDevice).await {
+    match client
+        .get::<serde_json::Value>(nrd::USER_INFO_PATH, Scope::AccountDevice)
+        .await
+    {
         Ok(_) => RestoreOutcome::Restored,
         Err(ref error) if error.invalid_credentials() => {
             session::clear();
@@ -194,7 +197,6 @@ pub async fn list_devices() -> Result<Vec<Device>> {
     *device_cache().lock().unwrap() = devices.clone();
     Ok(devices)
 }
-
 
 /// 本次进程内拉取过的设备目录,供标题栏按设备号查名字。
 fn device_cache() -> &'static Mutex<Vec<Device>> {

@@ -24,6 +24,7 @@ impl HostHandshake {
         self.connected.store(false, Ordering::Release);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
     }

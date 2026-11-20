@@ -109,6 +109,8 @@ impl ConnectionCore {
         Ok(wire)
     }
 
+    /// KCP 控制载体入口;uunet 走纯 SCTP,保留供 KCP 路线启用。
+    #[allow(dead_code)]
     pub fn activate_control(&self, version: Option<u8>, receiver: ControlReceiver) -> Result<()> {
         if let Some(version) = version {
             self.control
@@ -126,6 +128,8 @@ impl ConnectionCore {
             .context("close native peer connection")
     }
 
+    /// 会话中途改 ICE 配置(重协商);当前建连时一次配置到位。
+    #[allow(dead_code)]
     pub async fn configure_ice(
         &self,
         servers: Vec<RTCIceServer>,

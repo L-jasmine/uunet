@@ -46,9 +46,7 @@ impl Receiver {
     pub(crate) async fn bind(&self, channel: &Arc<RTCDataChannel>) {
         self.invalidate();
         self.transport.bind(channel);
-        channel
-            .set_buffered_amount_low_threshold(BUFFER / 2)
-            .await;
+        channel.set_buffered_amount_low_threshold(BUFFER / 2).await;
         let transport = self.transport.clone();
         channel
             .on_buffered_amount_low(Box::new(move || {
@@ -70,7 +68,11 @@ impl Receiver {
             route.stop.cancel();
         }
     }
-    pub(crate) async fn receive(&self, channel: &Arc<RTCDataChannel>, bytes: &[u8]) -> Result<bool> {
+    pub(crate) async fn receive(
+        &self,
+        channel: &Arc<RTCDataChannel>,
+        bytes: &[u8],
+    ) -> Result<bool> {
         tracing::debug!(bytes = bytes.len(), "host FILE message received");
         ensure!(bytes.len() <= WIRE_LIMIT, "端口转发消息过大");
         let Some(payload) = crate::pb::decode_port_mapping(bytes)? else {

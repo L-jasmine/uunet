@@ -5,8 +5,8 @@
 //! omarchyuu 的多进程 presence 所有权锁(reserve_presence)与 assist/WOL
 //! 常驻推送不在此版本;多实例互踢问题留给后续阶段。
 
-use super::client::HostClient;
 use super::HostState;
+use super::client::HostClient;
 use crate::backend::nrd::{self, CallError};
 use crate::signal::{self, SignalFailure, SignalPushHandler, SignalRole, SocketState};
 use anyhow::Result;
@@ -67,10 +67,7 @@ pub(super) async fn run_presence(
                     }
                     Duration::from_millis(500)
                 };
-                tracing::warn!(
-                    "在线房间请求失败:{error:#};{} ms 后重试",
-                    delay.as_millis()
-                );
+                tracing::warn!("在线房间请求失败:{error:#};{} ms 后重试", delay.as_millis());
                 tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
                     _ = tokio::time::sleep(delay) => {}
@@ -108,7 +105,10 @@ pub(super) async fn run_presence(
                 let mut socket_state = session.socket_state();
                 let mut state_open = true;
                 let (shutdown, shutdown_receiver) = oneshot::channel();
-                let alive = session.keep_alive_host(shutdown_receiver, signal::host::Session::new(client.clone()));
+                let alive = session.keep_alive_host(
+                    shutdown_receiver,
+                    signal::host::Session::new(client.clone()),
+                );
                 tokio::pin!(alive);
                 loop {
                     tokio::select! {

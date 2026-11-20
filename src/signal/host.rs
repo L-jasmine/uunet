@@ -6,13 +6,14 @@
 //! 上报空 display_info 与空编解码列表(data-only 模板,signal/host.rs:483)。
 
 use super::*;
-use anyhow::Context as _;
 use crate::capability::DeviceCapability;
 use crate::host::client::HostClient;
-use crate::peer::Peer;
 use crate::pb::ConnectOptions;
+use crate::peer::Peer;
+use anyhow::Context as _;
 use prost::Message as _;
 use serde_json::Value;
+#[allow(unused_imports)]
 use std::collections::VecDeque;
 
 pub(crate) enum Event {
@@ -228,7 +229,10 @@ impl Session {
         let cancel = tokio_util::sync::CancellationToken::new();
         let peer_started = std::time::Instant::now();
         let (peer, candidates) = Peer::new(servers, relay, cancel).await?;
-        tracing::info!(peer_ms = peer_started.elapsed().as_millis(), "host connection prepared");
+        tracing::info!(
+            peer_ms = peer_started.elapsed().as_millis(),
+            "host connection prepared"
+        );
         self.client_id = client_id;
         self.ice_id = ice_id;
         self.app_control_id = app_control_id;

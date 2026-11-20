@@ -1,7 +1,7 @@
 //! Reed-Solomon CM256(GF(256))编解码纯函数,从 omarchyuu transport/rsfec.rs
 //! 拷贝;仅保留混合 KCP 的 FEC 依赖(cm256_* + GF 域运算),RTP 分片结构不在此。
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use std::sync::OnceLock;
 
 pub(crate) fn cm256_decode_originals(

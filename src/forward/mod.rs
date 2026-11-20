@@ -73,42 +73,22 @@ pub(crate) enum Protocol {
 }
 impl Protocol {
     pub(crate) fn syn(self) -> i32 {
-        if self == Self::Tcp {
-            0
-        } else {
-            16
-        }
+        if self == Self::Tcp { 0 } else { 16 }
     }
     pub(crate) fn ack(self) -> i32 {
-        if self == Self::Tcp {
-            3
-        } else {
-            17
-        }
+        if self == Self::Tcp { 3 } else { 17 }
     }
     pub(crate) fn ready(self) -> i32 {
         self.syn() + 4
     }
     pub(crate) fn fin(self) -> i32 {
-        if self == Self::Tcp {
-            1
-        } else {
-            19
-        }
+        if self == Self::Tcp { 1 } else { 19 }
     }
     pub(crate) fn label(self) -> &'static str {
-        if self == Self::Tcp {
-            "TCP"
-        } else {
-            "UDP"
-        }
+        if self == Self::Tcp { "TCP" } else { "UDP" }
     }
     pub(crate) fn from_kind(kind: i32) -> Self {
-        if kind == 16 {
-            Self::Udp
-        } else {
-            Self::Tcp
-        }
+        if kind == 16 { Self::Udp } else { Self::Tcp }
     }
 }
 
@@ -479,6 +459,7 @@ impl Rule {
     }
 }
 #[derive(Clone, Default)]
+#[allow(dead_code)]
 pub(crate) enum ProbeStatus {
     #[default]
     Unknown,
@@ -489,6 +470,7 @@ pub(crate) enum ProbeStatus {
     Unreachable(String),
 }
 #[derive(Clone, Default)]
+#[allow(dead_code)]
 pub(crate) struct RuleStatus {
     pub listening: bool,
     pub connections: usize,
@@ -502,7 +484,6 @@ pub(crate) struct RuleStatus {
     pub send_rate: f64,
     pub receive_rate: f64,
 }
-
 
 pub(crate) async fn run_rule(
     rule: Rule,
@@ -573,4 +554,3 @@ async fn probe_loop(
         tokio::select! {biased;_=stop.cancelled()=>break,_=requested.notified()=>{},_=tokio::time::sleep(Duration::from_secs(30))=>{}}
     }
 }
-

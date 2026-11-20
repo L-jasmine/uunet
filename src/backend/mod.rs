@@ -67,11 +67,13 @@ pub struct Device {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Protocol {
     Tcp,
     Udp,
 }
 
+#[allow(dead_code)]
 impl Protocol {
     pub fn label(self) -> &'static str {
         match self {
@@ -84,6 +86,7 @@ impl Protocol {
 /// A forwarding rule for one device: the controller listens locally and
 /// every connection is tunneled to `target:target_port` on that device.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Rule {
     pub id: u64,
     pub name: String,
@@ -94,12 +97,17 @@ pub struct Rule {
     pub enabled: bool,
 }
 
+#[allow(dead_code)]
 impl Rule {
     pub fn listen_label(&self) -> String {
-        format!(":{}{}", self.local_port, match self.protocol {
-            Protocol::Tcp => "/tcp",
-            Protocol::Udp => "/udp",
-        })
+        format!(
+            ":{}{}",
+            self.local_port,
+            match self.protocol {
+                Protocol::Tcp => "/tcp",
+                Protocol::Udp => "/udp",
+            }
+        )
     }
 
     pub fn target_label(&self) -> String {
@@ -118,6 +126,7 @@ impl Rule {
 
 /// Field-level validation input for `add_rule`.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct RuleForm {
     pub name: String,
     pub protocol: Protocol,
@@ -203,19 +212,23 @@ pub fn device_by_id(id: &str) -> Option<Device> {
 }
 
 // ---- 端口映射规则(两种模式同为本地数据) ----
-
+// 已被 controller 的真实规则持久化取代,保留供 mock / 后续回退使用。
+#[allow(dead_code)]
 pub fn list_rules(device_id: &str) -> Vec<Rule> {
     mock::list_rules(device_id)
 }
 
+#[allow(dead_code)]
 pub fn add_rule(device_id: &str, form: &RuleForm) -> Result<Rule, String> {
     mock::add_rule(device_id, form)
 }
 
+#[allow(dead_code)]
 pub fn toggle_rule(id: u64) {
     mock::toggle_rule(id)
 }
 
+#[allow(dead_code)]
 pub fn delete_rule(id: u64) {
     mock::delete_rule(id)
 }

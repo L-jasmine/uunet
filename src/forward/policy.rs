@@ -16,8 +16,7 @@ pub(crate) fn allow(host: IpAddr, port: u16, protocol: &super::Protocol) -> bool
     settings.whitelist.iter().any(|target| {
         target.port == port
             && target.proto.trim().to_ascii_lowercase() == proto
-            && parse_host(&target.host)
-                .is_some_and(|allowed| allowed == host)
+            && parse_host(&target.host).is_some_and(|allowed| allowed == host)
     })
 }
 

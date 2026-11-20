@@ -105,10 +105,7 @@ pub fn Login(props: &mut LoginProps, mut hooks: Hooks) -> impl Into<AnyElement<'
         }
     });
 
-    let qr = session
-        .read().clone()
-        .as_ref()
-        .map(|s| qr_matrix(&s.url));
+    let qr = session.read().clone().as_ref().map(|s| qr_matrix(&s.url));
     let status_text = status.read().clone();
 
     element!(View(
@@ -158,7 +155,11 @@ impl Widget for LoginWidget {
 
         // Title / status / QR / hint, the group centered in the card.
         // 二维码:每模块 1 列宽、半个字符行高(半块字符)。
-        let qr_cols = self.qr.as_ref().map(|(width, _)| *width as u16).unwrap_or(0);
+        let qr_cols = self
+            .qr
+            .as_ref()
+            .map(|(width, _)| *width as u16)
+            .unwrap_or(0);
         let qr_rows = qr_cols.div_ceil(2);
         let chunks: [Rect; 4] = Layout::vertical([
             Constraint::Length(1),
@@ -184,29 +185,33 @@ impl Widget for LoginWidget {
             "打开 UU 远程手机端「扫一扫」完成登录"
         };
         Paragraph::new(Line::from(hint.dark_gray()).centered())
-        .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
-        .render(chunks[3], buf);
+            .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
+            .render(chunks[3], buf);
     }
 }
 
 /// 白底黑块直绘:整块区域铺白,暗模块以黑色半块字符呈现
 /// (一个终端字符行承载两行模块)。
-fn draw_qr(buf: &mut ratatui_kit::ratatui::buffer::Buffer, area: Rect, width: usize, modules: &[bool]) {
-    let style = Style::new().fg(ratatui_kit::ratatui::style::Color::Black)
+fn draw_qr(
+    buf: &mut ratatui_kit::ratatui::buffer::Buffer,
+    area: Rect,
+    width: usize,
+    modules: &[bool],
+) {
+    let style = Style::new()
+        .fg(ratatui_kit::ratatui::style::Color::Black)
         .bg(ratatui_kit::ratatui::style::Color::White);
-    let dark = |x: usize, y: usize| -> bool {
-        x < width && y < width && modules[y * width + x]
-    };
+    let dark = |x: usize, y: usize| -> bool { x < width && y < width && modules[y * width + x] };
     for row in 0..area.height as usize {
         let top = row * 2;
         for col in 0..(area.width as usize).min(width) {
             let upper = dark(col, top);
             let lower = dark(col, top + 1);
             let symbol = match (upper, lower) {
-                (true, true) => "\u{2588}",   // █ 全黑
-                (true, false) => "\u{2580}",  // ▀ 上黑
-                (false, true) => "\u{2584}",  // ▄ 下黑
-                (false, false) => " ",        // 白底
+                (true, true) => "\u{2588}",  // █ 全黑
+                (true, false) => "\u{2580}", // ▀ 上黑
+                (false, true) => "\u{2584}", // ▄ 下黑
+                (false, false) => " ",       // 白底
             };
             let cell = &mut buf[(area.x + col as u16, area.y + row as u16)];
             cell.set_symbol(symbol);
@@ -231,8 +236,16 @@ mod tests {
         assert!(width > 10, "qr too narrow: {width}");
         assert_eq!(modules.len(), width * width, "matrix must be square");
         // 白边静区:四角 2x2 全为白。
-        for (x, y) in [(0, 0), (1, 1), (width - 1, width - 1), (width - 2, width - 2)] {
-            assert!(!modules[y * width + x], "quiet zone at ({x},{y}) must be white");
+        for (x, y) in [
+            (0, 0),
+            (1, 1),
+            (width - 1, width - 1),
+            (width - 2, width - 2),
+        ] {
+            assert!(
+                !modules[y * width + x],
+                "quiet zone at ({x},{y}) must be white"
+            );
         }
         // 码区存在暗模块。
         assert!(modules.iter().any(|dark| *dark), "qr has no dark modules");

@@ -7,11 +7,7 @@
 use super::nrd::{self, Scope};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    path::PathBuf,
-    sync::OnceLock,
-};
+use std::{fs, path::PathBuf, sync::OnceLock};
 
 const SCHEMA: u8 = 1;
 
@@ -161,8 +157,11 @@ fn os_name() -> String {
         .ok()
         .and_then(|text| {
             text.lines().find_map(|l| {
-                l.starts_with("PRETTY_NAME=")
-                    .then(|| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string())
+                l.starts_with("PRETTY_NAME=").then(|| {
+                    l.trim_start_matches("PRETTY_NAME=")
+                        .trim_matches('"')
+                        .to_string()
+                })
             })
         })
         .unwrap_or_else(|| "Linux".into())
@@ -217,7 +216,12 @@ pub async fn ensure_registered() -> Result<nrd::Identity> {
         let client = nrd::NrdClient::new(identity.client_identity())?;
         let body = init_body(&identity);
         let data: nrd::DeviceInitData = client
-            .post(nrd::DEVICE_INIT_PATH, Scope::Platform, &body, std::time::Duration::from_secs(30))
+            .post(
+                nrd::DEVICE_INIT_PATH,
+                Scope::Platform,
+                &body,
+                std::time::Duration::from_secs(30),
+            )
             .await
             .map_err(|e| anyhow::anyhow!("设备注册失败: {e}"))?;
         if data.device_id.len() != 16 {

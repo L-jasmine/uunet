@@ -8,29 +8,38 @@ use webrtc::rtp_transceiver::rtp_codec::{
 // UU SDP, codec and extension registration; no session ownership.
 pub(crate) const MAX_DATA_CHANNEL_MESSAGE_SIZE: u32 = 524_288;
 
+// 以下 URI/函数来自 omarchyuu 的视频路径,uunet 只转发端口,保留备查。
+#[allow(dead_code)]
 pub(crate) const PLAYOUT_DELAY_URI: &str =
     "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay";
 
+#[allow(dead_code)]
 pub(crate) const VIDEO_CONTENT_TYPE_URI: &str =
     "http://www.webrtc.org/experiments/rtp-hdrext/video-content-type";
 
+#[allow(dead_code)]
 pub(crate) const VIDEO_CAPTURE_INDEX_URI: &str =
     "http://www.webrtc.org/experiments/rtp-hdrext/video-capture-index";
 
 pub(crate) const VIDEO_IS_NEW_FRAME_URI: &str =
     "http://www.webrtc.org/experiments/rtp-hdrext/video-frame-is-new-frame";
 
+#[allow(dead_code)]
 pub(crate) const VIDEO_TIMING_URI: &str =
     "http://www.webrtc.org/experiments/rtp-hdrext/video-timing";
 
+#[allow(dead_code)]
 pub(crate) const VIDEO_FRAME_SENDING_DELAY_URI: &str =
     "http://www.webrtc.org/experiments/rtp-hdrext/video-frame-sending-delay";
 
+#[allow(dead_code)]
 pub(crate) const RTP_STREAM_ID_URI: &str = "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id";
 
+#[allow(dead_code)]
 pub(crate) const REPAIRED_RTP_STREAM_ID_URI: &str =
     "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id";
 
+#[allow(dead_code)]
 pub(crate) fn candidate_is_relay(candidate: &str) -> bool {
     candidate
         .split_ascii_whitespace()
@@ -41,6 +50,7 @@ pub(crate) fn candidate_is_relay(candidate: &str) -> bool {
         })
 }
 
+#[allow(dead_code)]
 pub(crate) fn remove_relay_candidates_from_sdp(sdp: &str) -> String {
     let separator = if sdp.contains("\r\n") { "\r\n" } else { "\n" };
     let mut filtered = sdp
@@ -59,8 +69,10 @@ pub(crate) fn remove_relay_candidates_from_sdp(sdp: &str) -> String {
 // Incoming-video feedback retains this transport bootstrap. The microphone's
 // fixed 100 kbps encoding allocation is not a measured path-capacity estimate.
 // There is no outgoing video/probe pacer supplying an evolving GCC estimate.
+#[allow(dead_code)]
 pub(crate) const UU_LOCAL_SEND_START_BPS: u64 = 8_100_000;
 
+#[allow(dead_code)]
 pub(crate) fn uu_transport_feedback_interval(send_bitrate_bps: u64) -> Duration {
     // 1DFE68: a 68-byte feedback budget at 5% of the send-side estimate,
     // bounded by the configured 50..250 ms interval (100 ms before an update).

@@ -167,8 +167,14 @@ impl NrdClient {
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str, scope: Scope) -> CallResult<T> {
-        self.send(reqwest::Method::GET, path, scope, Vec::new(), REQUEST_TIMEOUT)
-            .await
+        self.send(
+            reqwest::Method::GET,
+            path,
+            scope,
+            Vec::new(),
+            REQUEST_TIMEOUT,
+        )
+        .await
     }
 
     /// 创建被控房间(被控在线的第一步)。
@@ -201,7 +207,9 @@ impl NrdClient {
     /// 以主控身份加入目标设备的房间(kind 由 connect 帧声明,不在房间 API)。
     pub async fn join_device(&self, device_id: &str, force_join: bool) -> CallResult<RoomSession> {
         if device_id.len() != 16
-            || !device_id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            || !device_id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
         {
             return Err(CallError::Transport(anyhow::anyhow!("目标设备号格式无效")));
         }
@@ -231,17 +239,17 @@ impl NrdClient {
         if !body.is_empty() {
             request = request.body(body);
         }
-        let response = request
-            .send()
-            .await
-            .map_err(|e| CallError::Transport(anyhow::anyhow!("NRD 请求失败: {}", error_chain(&e))))?;
+        let response = request.send().await.map_err(|e| {
+            CallError::Transport(anyhow::anyhow!("NRD 请求失败: {}", error_chain(&e)))
+        })?;
         let status = response.status();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| CallError::Transport(anyhow::anyhow!("NRD 响应读取失败: {}", error_chain(&e))))?;
-        let envelope: Envelope<serde_json::Value> = serde_json::from_slice(&bytes)
-            .map_err(|e| CallError::Transport(anyhow::anyhow!("NRD 响应解析失败 (HTTP {status}): {e}")))?;
+        let bytes = response.bytes().await.map_err(|e| {
+            CallError::Transport(anyhow::anyhow!("NRD 响应读取失败: {}", error_chain(&e)))
+        })?;
+        let envelope: Envelope<serde_json::Value> =
+            serde_json::from_slice(&bytes).map_err(|e| {
+                CallError::Transport(anyhow::anyhow!("NRD 响应解析失败 (HTTP {status}): {e}"))
+            })?;
         // 与 omarchyuu 一致:非 200 且信封 code==0 时,以 HTTP 状态码为准。
         let code = if status != reqwest::StatusCode::OK && envelope.code == 0 {
             i32::from(status.as_u16())
@@ -261,9 +269,7 @@ impl NrdClient {
             .map_err(|e| {
                 CallError::Transport(anyhow::anyhow!("NRD 成功数据解码失败 ({path}): {e}"))
             })?
-            .ok_or_else(|| {
-                CallError::Transport(anyhow::anyhow!("NRD 响应缺少 data ({path})"))
-            })?;
+            .ok_or_else(|| CallError::Transport(anyhow::anyhow!("NRD 响应缺少 data ({path})")))?;
         Ok(data)
     }
 
@@ -312,8 +318,8 @@ impl NrdClient {
             .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join("&");
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(SIGNING_KEY)
-            .expect("HMAC 接受任意长度密钥");
+        let mut mac =
+            <Hmac<Sha256> as Mac>::new_from_slice(SIGNING_KEY).expect("HMAC 接受任意长度密钥");
         mac.update(method.to_ascii_uppercase().as_bytes());
         mac.update(path.as_bytes());
         mac.update(canonical.as_bytes());
