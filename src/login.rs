@@ -67,9 +67,14 @@ pub fn Login(props: &mut LoginProps, mut hooks: Hooks) -> impl Into<AnyElement<'
                                 status.set("手机端已取消,正在刷新二维码…".into());
                                 break;
                             }
-                            Ok(backend::QrStatus::Expired) | Err(_) => {
+                            Ok(backend::QrStatus::Expired) => {
                                 status.set("二维码已过期,正在重新生成…".into());
                                 break;
+                            }
+                            Err(error) => {
+                                // 网络错误与过期不同:不刷新码,保留会话直接重试轮询。
+                                tracing::error!("二维码状态轮询失败:{error:#}");
+                                status.set(format!("状态查询失败({error}),3 秒后重试"));
                             }
                         }
                     }

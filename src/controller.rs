@@ -112,14 +112,17 @@ pub fn connect(device_id: &str) -> Result<()> {
         crate::controller::drop_cancel(&device);
         match outcome {
             Ok(()) => set_status(&device, MappingStatus { state: "已断开".into(), ..Default::default() }),
-            Err(error) => set_status(
-                &device,
-                MappingStatus {
-                    state: "失败".into(),
-                    error: Some(format!("{error:#}")),
-                    rules_listening: 0,
-                },
-            ),
+            Err(error) => {
+                tracing::error!("主控映射会话失败(target={device}):{error:#}");
+                set_status(
+                    &device,
+                    MappingStatus {
+                        state: "失败".into(),
+                        error: Some(format!("{error:#}")),
+                        rules_listening: 0,
+                    },
+                );
+            }
         }
     });
     Ok(())
