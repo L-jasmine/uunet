@@ -8,7 +8,7 @@
 
 use super::settings;
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, OnceLock,
     atomic::{AtomicU64, Ordering},
 };
 use tokio::sync::watch;
@@ -21,6 +21,13 @@ pub(crate) struct Lease {
     status: Arc<Mutex<crate::forward::host::Status>>,
 }
 
+static ACTIVE: OnceLock<Lease> = OnceLock::new();
+
+/// 最近一次被控会话的 Lease(无会话时返回零值统计)。
+pub(crate) fn current_status() -> crate::forward::host::Status {
+    ACTIVE.get().map(Lease::status).unwrap_or_default()
+}
+
 impl Lease {
     pub(crate) fn new(settings: settings::Shared) -> Self {
         let (revision_tx, _) = watch::channel(0_u64);
@@ -31,6 +38,7 @@ impl Lease {
             status: Arc::new(Mutex::new(crate::forward::host::Status::default())),
         };
         lease.spawn_settings_watcher();
+        let _ = ACTIVE.set(lease.clone());
         lease
     }
 

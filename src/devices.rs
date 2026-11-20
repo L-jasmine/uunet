@@ -22,12 +22,39 @@ pub struct DevicesProps {
     pub page: Option<State<Page>>,
 }
 
+/// 被控状态的展示文本(未启动 --host 时为空)。
+fn host_status_text() -> String {
+    match crate::host::running_handle() {
+        Some(handle) => match &*handle.state.borrow() {
+            crate::host::HostState::Off => "",
+            crate::host::HostState::Connecting => "被控:连接中",
+            crate::host::HostState::Online => "被控:在线",
+            crate::host::HostState::Reconnecting => "被控:重连中",
+            crate::host::HostState::Offline => "被控:离线",
+        }
+        .to_string(),
+        None => String::new(),
+    }
+}
+
 #[component]
 pub fn Devices(props: &mut DevicesProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let mut page = props.page.clone().expect("Devices 组件需要 page 属性");
     let devices = hooks.use_state(Vec::new);
     let mut selected = hooks.use_state(|| 0_usize);
     let error = hooks.use_state(String::new);
+    let host_status = hooks.use_state(String::new);
+
+    // 被控状态行:500ms 轮询 watch(与统计刷新同节奏)。
+    {
+        let mut host_status = host_status.clone();
+        hooks.use_future(async move {
+            loop {
+                host_status.set(host_status_text());
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        });
+    }
 
     let mut load_devices = devices.clone();
     let mut load_error = error.clone();
@@ -74,6 +101,10 @@ pub fn Devices(props: &mut DevicesProps, mut hooks: Hooks) -> impl Into<AnyEleme
                 }
                 EventResult::Consumed
             }
+            KeyCode::Char('h') => {
+                page.set(Page::Host);
+                EventResult::Consumed
+            }
             KeyCode::Char('r') => {
                 // 键位事件不能 await;丢到后台任务,完成后回写状态。
                 let mut fresh = devices.clone();
@@ -108,6 +139,7 @@ pub fn Devices(props: &mut DevicesProps, mut hooks: Hooks) -> impl Into<AnyEleme
         widget(DevicesHeaderWidget {
             total: devices_value.len(),
             online: devices_value.iter().filter(|d| d.online).count(),
+            host_status: host_status.read().clone(),
         })
         widget(DevicesWidget { devices: devices_value, selected: selected_value, error: error_value })
         widget(DevicesHelpWidget)
@@ -119,13 +151,19 @@ pub fn Devices(props: &mut DevicesProps, mut hooks: Hooks) -> impl Into<AnyEleme
 struct DevicesHeaderWidget {
     total: usize,
     online: usize,
+    host_status: String,
 }
 
 impl Widget for DevicesHeaderWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
+        let suffix = if self.host_status.is_empty() {
+            String::new()
+        } else {
+            format!("   {}", self.host_status)
+        };
         Paragraph::new(Line::from(format!(
-            " uunet 设备列表   共 {} 台,在线 {} 台",
-            self.total, self.online
+            " uunet 设备列表   共 {} 台,在线 {} 台{}",
+            self.total, self.online, suffix
         ))
         .cyan()
         .bold())
@@ -218,7 +256,10 @@ struct DevicesHelpWidget;
 impl Widget for DevicesHelpWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
         Paragraph::new(
-            Line::from(" ↑/↓ 选择   Enter 端口映射   r 刷新   q 退出 ".dark_gray()).centered(),
+            Line::from(
+                " ↑/↓ 选择   Enter 端口映射   h 被控   r 刷新   q 退出 ".dark_gray(),
+            )
+            .centered(),
         )
         .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
         .render(area, buf);

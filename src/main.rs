@@ -14,6 +14,7 @@ mod fec;
 mod forward;
 mod host;
 mod kcp;
+mod host_page;
 mod login;
 mod pb;
 mod peer;

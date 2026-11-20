@@ -1,6 +1,7 @@
 //! Top-level component: login → devices → per-device port map.
 
 use crate::devices::Devices;
+use crate::host_page::HostPage;
 use crate::login::Login;
 use crate::portmap::PortMap;
 use ratatui_kit::prelude::*;
@@ -10,6 +11,7 @@ use ratatui_kit::ratatui::layout::{Constraint, Direction};
 pub enum Page {
     Login,
     Devices,
+    Host,
     PortMap(String),
 }
 
@@ -33,6 +35,14 @@ fn App(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
             height: Constraint::Percentage(100),
         ) {
             Devices(page: page.clone())
+        })
+    } else if current == Page::Host {
+        element!(View(
+            flex_direction: Direction::Vertical,
+            width: Constraint::Percentage(100),
+            height: Constraint::Percentage(100),
+        ) {
+            HostPage()
         })
     } else {
         let Page::PortMap(device_id) = current else {
