@@ -9,7 +9,6 @@ use super::*;
 use anyhow::Context as _;
 use crate::capability::DeviceCapability;
 use crate::host::client::HostClient;
-use crate::host::settings;
 use crate::peer::Peer;
 use crate::pb::ConnectOptions;
 use prost::Message as _;
@@ -23,7 +22,6 @@ pub(crate) enum Event {
 
 pub(crate) struct Session {
     client: HostClient,
-    settings: settings::Shared,
     peer: Option<Peer>,
     candidates: tokio::sync::mpsc::UnboundedReceiver<
         webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
@@ -38,7 +36,6 @@ impl Session {
     pub(crate) fn new(client: HostClient) -> Self {
         Self {
             client,
-            settings: settings::shared(),
             peer: None,
             candidates: tokio::sync::mpsc::unbounded_channel().1,
             client_id: String::new(),
@@ -46,12 +43,6 @@ impl Session {
             app_control_id: String::new(),
             initialized: false,
         }
-    }
-
-    /// 本机策略:总开关 + 端口转发都允许,才接受映射会话。
-    fn allowed(&self) -> bool {
-        let settings = self.settings.read().unwrap();
-        settings.allow && settings.port_mapping
     }
 
     pub(crate) async fn next(&mut self) -> Event {
@@ -87,7 +78,7 @@ impl Session {
             Event::Poll => {
                 // 策略关闭或对端已死:清理本连接;房间与在线不受影响
                 // (omarchyuu signal/host.rs:137 的同款边界)。
-                if self.peer.is_some() && (!self.allowed() || self.peer.as_ref().is_some_and(Peer::ended)) {
+                if self.peer.is_some() && self.peer.as_ref().is_some_and(Peer::ended) {
                     self.end_control(signal).await;
                 }
             }
@@ -103,15 +94,6 @@ impl Session {
         signal: &mut SignalSession,
     ) -> Result<()> {
         if !self.client.is_active() {
-            return Ok(());
-        }
-        if !self.allowed() {
-            if event == "be-controlled" {
-                // 云端设备列表可能滞后:明确拒绝,避免主控空等。
-                self.end_control(signal).await;
-                Self::notify_termination(signal).await;
-                tracing::info!("host incoming connection refused by local access policy");
-            }
             return Ok(());
         }
         match event {
@@ -220,10 +202,6 @@ impl Session {
             Self::notify_termination(signal).await;
             anyhow::bail!("uunet 被控端只接受端口转发会话");
         }
-        anyhow::ensure!(
-            self.allowed() && self.settings.read().unwrap().port_mapping,
-            "本机未允许端口转发"
-        );
         let servers: Vec<ControlIceServer> = serde_json::from_value(
             value
                 .get("iceServers")

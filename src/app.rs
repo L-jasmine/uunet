@@ -42,7 +42,7 @@ fn App(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
             width: Constraint::Percentage(100),
             height: Constraint::Percentage(100),
         ) {
-            HostPage()
+            HostPage(page: page.clone())
         })
     } else {
         let Page::PortMap(device_id) = current else {

@@ -1,9 +1,9 @@
-//! 被控页:总开关、端口转发开关、拨号白名单与当前连接统计。
+//! 转发白名单页:管理允许被拨号的目标列表(uunet 被控端唯一的准入项)。
 //!
-//! 设置直接写 `~/.config/uunet/host.json`(settings::shared + save),
-//! 转发侧的 Lease 监视器会在 400ms 内捕获变更并失效在途连接。
+//! 每条精确匹配 IP:port:proto,空表 = 全部拒绝;编辑实时写
+//! `~/.config/uunet/host.json`,转发拨号前实时读取,无需重启。
 
-use crate::backend;
+use crate::app::Page;
 use crate::host::settings::{self, Target};
 use ratatui_kit::{
     crossterm::event::{Event, KeyCode, KeyEventKind},
@@ -20,12 +20,15 @@ use std::cmp::min;
 const WHITELIST_FIELDS: [&str; 4] = ["名称", "协议", "地址", "端口"];
 
 #[derive(Default, Props)]
-pub struct HostPageProps {}
+pub struct HostPageProps {
+    /// 父级页面状态;Esc/q 写入 Page::Devices 返回设备列表。
+    pub page: Option<State<Page>>,
+}
 
 #[component]
 pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    let _ = props;
-    let mut selection = hooks.use_state(|| 0_usize); // 0 开关 1 端口转发 2.. 白名单行
+    let mut page = props.page.clone().expect("HostPage 组件需要 page 属性");
+    let mut selection = hooks.use_state(|| 0_usize);
     let mut form_open = hooks.use_state(|| false);
     let mut field_idx = hooks.use_state(|| 0_usize);
     let mut f_name = hooks.use_state(String::new);
@@ -37,7 +40,7 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
     let mut host_state = hooks.use_state(|| "关闭".to_string());
     let mut connections = hooks.use_state(|| (0_usize, 0_u64, 0_u64));
 
-    // 被控状态与连接统计:各挂一个后台刷新循环(与 devices 页同模式)。
+    // 被控状态与连接统计:后台循环刷新(与 devices 页同模式)。
     {
         let mut host_state = host_state.clone();
         hooks.use_future(async move {
@@ -62,7 +65,6 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
         let mut connections = connections.clone();
         hooks.use_future(async move {
             loop {
-                // 统计来自 access Lease;未运行被控会话时为零值。
                 let stats = crate::host::access::current_status();
                 connections.set((stats.connections, stats.sent, stats.received));
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -95,37 +97,29 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
                 &mut selection,
             );
         }
-        // 选择行:0 允许被控,1 允许端口转发,2..=白名单行
-        let rows = 2 + whitelist_len;
         match key.code {
-            KeyCode::Char('q') => {
-                exit();
+            KeyCode::Char('q') | KeyCode::Esc => {
+                page.set(Page::Devices);
                 EventResult::Consumed
             }
-            KeyCode::Up => {
-                selection.set(selection.get().saturating_sub(1) % rows.max(1));
+            KeyCode::Up if whitelist_len > 0 => {
+                selection.set(selection.get().saturating_sub(1) % whitelist_len);
                 EventResult::Consumed
             }
-            KeyCode::Down => {
-                selection.set((selection.get() + 1) % rows.max(1));
+            KeyCode::Down if whitelist_len > 0 => {
+                selection.set((selection.get() + 1) % whitelist_len);
                 EventResult::Consumed
             }
-            KeyCode::Char(' ') => {
+            KeyCode::Char(' ') if whitelist_len > 0 => {
                 let shared = settings::shared();
                 let mut settings = shared.write().unwrap();
-                match selection.get() {
-                    0 => settings.allow = !settings.allow,
-                    1 => settings.port_mapping = !settings.port_mapping,
-                    index => {
-                        let target_index = index - 2;
-                        if target_index < settings.whitelist.len() {
-                            let target = &mut settings.whitelist[target_index];
-                            target.proto = if target.proto == "tcp" { "udp" } else { "tcp" }.into();
-                        }
-                    }
+                let index = min(selection.get(), settings.whitelist.len().saturating_sub(1));
+                if let Some(target) = settings.whitelist.get_mut(index) {
+                    target.proto =
+                        if target.proto == "tcp" { "udp".to_string() } else { "tcp".to_string() };
                 }
                 if let Err(error) = settings::save(&settings) {
-                    tracing::error!(%error, "保存被控设置失败");
+                    tracing::error!(%error, "保存白名单失败");
                 }
                 EventResult::Consumed
             }
@@ -139,11 +133,8 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
                 form_open.set(true);
                 EventResult::Consumed
             }
-            KeyCode::Char('d') => {
-                let index = selection.get();
-                if index >= 2 && index - 2 < whitelist_len {
-                    confirm_idx.set(Some(index - 2));
-                }
+            KeyCode::Char('d') if whitelist_len > 0 => {
+                confirm_idx.set(Some(min(selection.get(), whitelist_len - 1)));
                 EventResult::Consumed
             }
             _ => EventResult::Ignored,
@@ -151,7 +142,7 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
     });
 
     let settings_value = settings::shared().read().unwrap().clone();
-    let selected_value = min(selection.get(), 1 + settings_value.whitelist.len());
+    let selected_value = min(selection.get(), settings_value.whitelist.len().saturating_sub(1));
     let form_rows = build_form_rows(
         field_idx.get(),
         &f_name.read().clone(),
@@ -174,7 +165,7 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
         height: Constraint::Percentage(100),
     ) {
         widget(HostHeaderWidget { state: host_state_text, connections: stats_value })
-        widget(HostBodyWidget {
+        widget(WhitelistWidget {
             settings: settings_value,
             selected: selected_value,
             form_rows,
@@ -192,17 +183,17 @@ pub fn HostPage(props: &mut HostPageProps, mut hooks: Hooks) -> impl Into<AnyEle
                 confirm_text: "删除".to_string(),
                 cancel_text: "取消".to_string(),
                 on_confirm: move |_| {
-                    let index = confirm_idx.get();
+                    let Some(index) = confirm_idx.get() else {
+                        return;
+                    };
                     let shared = settings::shared();
                     {
                         let mut settings = shared.write().unwrap();
-                        if let Some(index) = index {
-                            if index < settings.whitelist.len() {
-                                settings.whitelist.remove(index);
-                            }
+                        if index < settings.whitelist.len() {
+                            settings.whitelist.remove(index);
                         }
                         if let Err(error) = settings::save(&settings) {
-                            tracing::error!(%error, "保存被控设置失败");
+                            tracing::error!(%error, "保存白名单失败");
                         }
                     }
                 },
@@ -273,13 +264,17 @@ fn handle_form_key(
                     return EventResult::Consumed;
                 }
                 drop(settings);
-                selection.set(2);
+                selection.set(0);
                 form_open.set(false);
                 EventResult::Consumed
             }
         }
         KeyCode::Char('t') if field_idx.get() == 1 => {
-            f_proto.set(if f_proto.read().as_str() == "tcp" { "udp".to_string() } else { "tcp".to_string() });
+            f_proto.set(if f_proto.read().as_str() == "tcp" {
+                "udp".to_string()
+            } else {
+                "tcp".to_string()
+            });
             EventResult::Consumed
         }
         KeyCode::Backspace => {
@@ -297,7 +292,11 @@ fn handle_form_key(
         KeyCode::Char(c) => {
             let idx = field_idx.get();
             if idx == 1 {
-                f_proto.set(if f_proto.read().as_str() == "tcp" { "udp".to_string() } else { "tcp".to_string() });
+                f_proto.set(if f_proto.read().as_str() == "tcp" {
+                    "udp".to_string()
+                } else {
+                    "tcp".to_string()
+                });
                 return EventResult::Consumed;
             }
             let field = match idx {
@@ -323,7 +322,12 @@ fn build_form_rows(
     host: &str,
     port: &str,
 ) -> Vec<(String, String, bool)> {
-    let values = [name.to_string(), proto.to_ascii_uppercase(), host.to_string(), port.to_string()];
+    let values = [
+        name.to_string(),
+        proto.to_ascii_uppercase(),
+        host.to_string(),
+        port.to_string(),
+    ];
     WHITELIST_FIELDS
         .iter()
         .enumerate()
@@ -331,7 +335,7 @@ fn build_form_rows(
         .collect()
 }
 
-/// 标题 + 状态 + 连接统计。
+/// 标题 + 被控状态 + 连接统计。
 #[derive(Clone)]
 struct HostHeaderWidget {
     state: String,
@@ -341,7 +345,7 @@ struct HostHeaderWidget {
 impl Widget for HostHeaderWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
         Paragraph::new(Line::from(format!(
-            " uunet 被控   状态:{}   连接 {} 条 ↑{}/↓{}",
+            " uunet 转发白名单   被控:{}   连接 {} 条 ↑{}/↓{}",
             self.state, self.connections.0, self.connections.1, self.connections.2
         ))
         .cyan()
@@ -350,9 +354,9 @@ impl Widget for HostHeaderWidget {
     }
 }
 
-/// 开关两行 + 白名单表(+ 可选的追加表单)。
+/// 白名单表(+ 可选的追加表单)。
 #[derive(Clone)]
-struct HostBodyWidget {
+struct WhitelistWidget {
     settings: settings::Settings,
     selected: usize,
     form_rows: Vec<(String, String, bool)>,
@@ -360,57 +364,29 @@ struct HostBodyWidget {
     show_form: bool,
 }
 
-impl Widget for HostBodyWidget {
+impl Widget for WhitelistWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
         let block = Block::bordered()
-            .title(Line::from(" 被控设置 ").cyan())
+            .title(Line::from(" 拨号白名单(精确匹配,空表 = 全拒) ").cyan())
             .border_style(Style::new().cyan());
         let inner = block.inner(area);
         block.render(area, buf);
 
-        let mut y = inner.y;
-        for (index, (label, value)) in [
-            ("允许被控", if self.settings.allow { "开" } else { "关" }),
-            (
-                "允许端口转发",
-                if self.settings.port_mapping { "开" } else { "关" },
-            ),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let selected = self.selected == index;
-            let marker = if selected { "▸ " } else { "  " };
-            let style = if selected {
-                Style::new().cyan().bold()
-            } else {
-                Style::new()
-            };
-            let dot = if value == "开" { "●".green() } else { "○".dark_gray() };
-            Paragraph::new(Line::from(format!("{marker}{label:<10} {dot} {value}")).style(style))
-                .render(Rect::new(inner.x, y, inner.width, 1), buf);
-            y += 1;
-        }
-        y += 1;
-        Paragraph::new(Line::from(" 拨号白名单(空表 = 全拒)").dark_gray())
-            .render(Rect::new(inner.x, y, inner.width, 1), buf);
-        y += 1;
         let columns = [
-            Constraint::Percentage(30),
+            Constraint::Percentage(32),
             Constraint::Length(8),
-            Constraint::Percentage(30),
+            Constraint::Percentage(32),
             Constraint::Length(8),
         ];
-        let header: [Rect; 4] = Layout::horizontal(columns)
-            .areas(Rect::new(inner.x, y, inner.width, 1));
+        let mut y = inner.y;
+        let header: [Rect; 4] = Layout::horizontal(columns).areas(Rect::new(inner.x, y, inner.width, 1));
         let labels = ["名称", "协议", "地址", "端口"];
         for (idx, chunk) in header.iter().enumerate() {
             Paragraph::new(Line::from(labels[idx]).dark_gray()).render(*chunk, buf);
         }
         y += 1;
         for (index, target) in self.settings.whitelist.iter().enumerate() {
-            let row_index = 2 + index;
-            let selected = self.selected == row_index;
+            let selected = index == self.selected;
             let row_rect = Rect::new(inner.x, y, inner.width, 1);
             let cells: [Rect; 4] = Layout::horizontal(columns).areas(row_rect);
             let values = [
@@ -429,11 +405,16 @@ impl Widget for HostBodyWidget {
             }
             y += 1;
         }
+        if self.settings.whitelist.is_empty() {
+            Paragraph::new(Line::from("白名单为空:任何转发拨号都会被拒绝,按 a 添加".dark_gray()).centered())
+                .alignment(ratatui_kit::ratatui::layout::Alignment::Center)
+                .render(Rect::new(inner.x, y, inner.width, 1), buf);
+            y += 1;
+        }
         if self.show_form {
             y += 1;
             let form_rect = Rect::new(inner.x, y, inner.width, WHITELIST_FIELDS.len() as u16 + 1);
-            let rows: [Rect; 4] =
-                Layout::vertical([Constraint::Length(1); 4]).areas(form_rect);
+            let rows: [Rect; 4] = Layout::vertical([Constraint::Length(1); 4]).areas(form_rect);
             for ((label, value, active), row) in self.form_rows.iter().zip(rows.iter()) {
                 let marker = if *active { "▸ " } else { "  " };
                 let style = if *active {
@@ -442,10 +423,9 @@ impl Widget for HostBodyWidget {
                     Style::new()
                 };
                 let cursor = if *active { "_" } else { "" };
-                Paragraph::new(Line::from(format!(
-                    "{marker}{label:<6} {value}{cursor}"
-                ))
-                .style(style))
+                Paragraph::new(
+                    Line::from(format!("{marker}{label:<6} {value}{cursor}")).style(style),
+                )
                 .render(*row, buf);
             }
         }
@@ -466,8 +446,7 @@ impl Widget for HostHelpWidget {
     fn render(self, area: Rect, buf: &mut ratatui_kit::ratatui::buffer::Buffer) {
         Paragraph::new(
             Line::from(
-                " ↑/↓ 选择   空格 开/关   a 加白名单   t 切协议   d 删除   Esc 返回设备   q 退出 "
-                    .dark_gray(),
+                " ↑/↓ 选择   空格 切协议   a 添加   d 删除   Esc/q 返回设备 ".dark_gray(),
             )
             .centered(),
         )

@@ -119,7 +119,7 @@ impl Peer {
 
         let kcp = UuKcpControl::default();
         // 端口转发:FILE 通道的接收器 + 拨号 actor(生命周期随 Peer)。
-        let lease = crate::host::access::Lease::new(crate::host::settings::shared());
+        let lease = crate::host::access::Lease::new();
         let (ports, ports_input) = crate::forward::host::Receiver::new(lease, connected.clone());
         tokio::spawn(crate::forward::host::run(
             ports.clone(),
