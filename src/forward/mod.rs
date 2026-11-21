@@ -501,6 +501,8 @@ pub(crate) async fn run_rule(
         rule.validate()?;
         let endpoint=SocketAddr::new(rule.local_addr,rule.local_port);
         let socket=if rule.local_addr.is_ipv4() {tokio::net::TcpSocket::new_v4()?} else {tokio::net::TcpSocket::new_v6()?};
+        // 断线重连/重启进程时旧连接常处于 TIME_WAIT,不设 REUSEADDR 会绑定失败。
+        socket.set_reuseaddr(true)?;
         socket.bind(endpoint).with_context(||format!("无法监听 {endpoint}（地址不可用或端口已占用）"))?;
         let listener=socket.listen(128)?;
         lock(&status).listening=true;
